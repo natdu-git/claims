@@ -145,9 +145,12 @@
   }
   input:focus,textarea:focus,select:focus{border-color:var(--jade);box-shadow:0 0 0 3px rgba(15,118,110,.12);}
   textarea{resize:vertical;min-height:56px;}
-  .amount-row{display:flex;gap:10px;}
-  .amount-row input{flex:1;font-family:var(--mono);font-size:20px;font-weight:600;text-align:right;letter-spacing:-.02em;}
-  .amount-row select{width:84px;flex:none;font-weight:400;font-size:14px;color:var(--ink-soft);}
+  .date-wrap{position:relative;}
+  .date-text{display:block;width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:16px;color:var(--ink);}
+  .date-overlay{position:absolute;inset:0;width:100%;height:100%;opacity:0;}
+  .amount-row{display:flex;gap:0;}
+  .amount-row input{flex:1;font-family:var(--mono);font-size:20px;font-weight:600;text-align:right;letter-spacing:-.02em;border-top-right-radius:0;border-bottom-right-radius:0;}
+  .amount-row select{width:62px;flex:none;font-weight:400;font-size:14px;color:var(--ink-soft);border-top-left-radius:0;border-bottom-left-radius:0;border-left:none;padding-left:6px;padding-right:4px;}
 
   .seg{display:flex;gap:8px;}
   .seg button{flex:1;padding:10px;border:1.5px solid var(--line);border-radius:11px;background:var(--surface);font-weight:600;font-size:15px;color:var(--ink-soft);display:flex;align-items:center;justify-content:center;gap:7px;}
@@ -181,7 +184,7 @@
   .proof-thumb img{width:100%;height:100%;object-fit:cover;}
   .proof-thumb .pdf{font-size:11px;font-weight:700;color:var(--danger);}
   .proof-thumb .del{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;width:20px;height:20px;border-radius:50%;font-size:13px;line-height:20px;text-align:center;}
-  .add-proof{width:78px;height:78px;border-radius:11px;border:1.5px dashed var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--slate);font-size:11px;font-weight:600;}
+  .add-proof{width:78px;height:78px;border-radius:11px;border:1.5px dashed var(--line);background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--slate);font-size:11px;font-weight:600;}
   .add-proof .plus{font-size:22px;font-weight:300;line-height:1;}
 
   /* image cropper */
@@ -368,6 +371,8 @@ function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&l
 function money(minor,cur){const v=(minor/100);return CUR_SYM[cur]+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
 function todayISO(){const d=new Date();const o=d.getTimezoneOffset();return new Date(d-o*60000).toISOString().slice(0,10);}
 function fmtDate(iso){if(!iso)return"";const [y,m,d]=iso.split("-");return `${d}/${m}/${y}`;}
+const MONTHS_ABBR=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtDateText(iso){if(!iso)return"Pick a date";const [y,m,d]=iso.split("-");return `${+d} ${MONTHS_ABBR[+m-1]||""} ${y}`;}
 function fmtDateShort(iso){if(!iso)return"";const [y,m,d]=iso.split("-");return `${d}/${m}/${y.slice(2)}`;}
 
 function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),2200);}
@@ -918,7 +923,10 @@ function renderEntryFormCompact(allTags, isEdit){
       </div>
       <div class="field nomb">
         <label>Date <span class="req">*</span></label>
-        <input type="date" id="cDate" value="${esc(d.payment_date)}" max="${todayISO()}">
+        <div class="date-wrap">
+          <span class="date-text" id="cDateText">${fmtDateText(d.payment_date)}</span>
+          <input type="date" id="cDate" value="${esc(d.payment_date)}" max="${todayISO()}" class="date-overlay">
+        </div>
       </div>
     </div>
 
@@ -951,7 +959,7 @@ function renderEntryFormCompact(allTags, isEdit){
 
     <div class="field nomb ${isTravel?"hidden":""}" id="cNotesCell">
       <label>Notes <span class="opt">(optional)</span></label>
-      <textarea id="cNotes" placeholder="Optional" style="min-height:42px;">${esc(d.notes)}</textarea>
+      <textarea id="cNotes" placeholder="Optional" rows="1" style="min-height:40px;height:40px;">${esc(d.notes)}</textarea>
     </div>
 
     <div class="field nomb">
@@ -1030,6 +1038,8 @@ function wireCompactForm(screen,isEdit){
   cAmt.addEventListener("focus",()=>{ cAmt.value=cAmt.value.replace(/,/g,""); });
   cAmt.addEventListener("blur",fmtAmount);
   fmtAmount();
+  const cDateEl=q("#cDate");
+  cDateEl.addEventListener("change",()=>{ d.payment_date=cDateEl.value; q("#cDateText").textContent=fmtDateText(cDateEl.value); });
   q("#cSave").addEventListener("click",async()=>{
     d.amount_str=q("#cAmount").value.trim();
     d.currency=q("#cCur").value;
@@ -1062,6 +1072,8 @@ async function openDetail(id){
   const e=state.entries.find(x=>x.id===id);if(!e)return;
   const proofs=await DB.getByIndex("proofs","entry_id",id);
   const edits=(await DB.getByIndex("edits","entry_id",id)).sort((a,b)=>b.edited_at-a.edited_at);
+  const bes=await DB.getByIndex("batch_entries","entry_id",id);
+  const activeBe=bes.find(b=>b.outcome!=="rejected");
 
   const kv=[
     ["Company",companyName(e.company_id)],
@@ -1098,7 +1110,8 @@ async function openDetail(id){
 
     <button class="btn btn-ghost" id="editBtn" style="margin-top:22px;">Edit entry</button>
     <button class="btn btn-ghost btn-sm" id="dupBtn" style="margin-top:10px;">Duplicate as new entry</button>
-    ${e.status==="unclaimed"?"":`<button class="btn btn-ghost btn-sm" id="statusBtn" style="margin-top:10px;">Change status</button>`}
+    ${activeBe?`<div class="hint" style="margin-top:16px;">This entry is part of a submitted claim, so its status is set by that claim — not editable here. To change or remove it, open the claim and undo it first.</div>
+    <button class="btn btn-ghost btn-sm" id="goClaimBtn" style="margin-top:10px;">View claim</button>`:""}
 
     ${edits.length?`<div class="section-label">Edit history</div>
       <div class="kv" style="padding:4px 15px;"><div class="edit-log">
@@ -1110,7 +1123,7 @@ async function openDetail(id){
   sc.querySelector("#detEdit").addEventListener("click",goEdit);
   sc.querySelector("#editBtn").addEventListener("click",goEdit);
   sc.querySelector("#dupBtn").addEventListener("click",()=>duplicateEntry(e));
-  sc.querySelector("#statusBtn")?.addEventListener("click",()=>changeStatusSheet(e));
+  sc.querySelector("#goClaimBtn")?.addEventListener("click",()=>{ closeTopScreen(); setTimeout(()=>openBatchDetail(activeBe.batch_id),260); });
 }
 
 function fmtDateTime(ts){const d=new Date(ts);const dd=String(d.getDate()).padStart(2,"0");const mm=String(d.getMonth()+1).padStart(2,"0");return `${dd}/${mm}/${d.getFullYear()}, `+d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});}
@@ -1397,7 +1410,7 @@ function reimburseBatchSheet(batchId,items,sc){
     await DB.put("batches",batch);
     for(const be of items){ if(be.outcome==="pending"){ be.outcome="reimbursed"; be.outcome_updated_at=Date.now(); await DB.put("batch_entries",be);
       const e=state.entries.find(x=>x.id===be.entry_id); if(e){ e.status="reimbursed"; await DB.put("entries",e); } } }
-    await loadAll(); closeSheet(); closeScreen(sc); setTimeout(()=>openBatchDetail(batchId),260); toast("Batch marked reimbursed");
+    await loadAll(); refreshCurrent(); closeSheet(); closeScreen(sc); setTimeout(()=>openBatchDetail(batchId),260); toast("Batch marked reimbursed");
   });
 }
 
@@ -1414,7 +1427,7 @@ function undoReimbursement(batchId,sc){
     const items=await DB.getByIndex("batch_entries","batch_id",batchId);
     for(const be of items){ if(be.outcome==="reimbursed"){ be.outcome="pending"; be.outcome_updated_at=Date.now(); await DB.put("batch_entries",be);
       const e=state.entries.find(x=>x.id===be.entry_id); if(e){ e.status="submitted"; await DB.put("entries",e); } } }
-    await loadAll(); closeSheet(); closeScreen(sc); setTimeout(()=>openBatchDetail(batchId),260); toast("Reimbursement undone");
+    await loadAll(); refreshCurrent(); closeSheet(); closeScreen(sc); setTimeout(()=>openBatchDetail(batchId),260); toast("Reimbursement undone");
   });
 }
 
@@ -1436,7 +1449,7 @@ function itemOutcomeSheet(beId,entryId,batchId){
       else e.status="submitted";
       await DB.put("entries",e);
     }
-    await loadAll();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Updated");
+    await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Updated");
   }));
 }
 
