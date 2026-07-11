@@ -169,13 +169,13 @@
 
   .loc-box{border:1px solid var(--line);border-radius:11px;padding:11px;background:var(--surface);}
   .loc-coords{font-family:var(--mono);font-size:13px;color:var(--ink-soft);}
-  .btn{display:block;width:100%;text-align:center;padding:15px;border-radius:13px;font-weight:700;font-size:16px;}
+  .btn{display:block;width:100%;text-align:center;padding:14px;border-radius:12px;font-weight:600;font-size:15px;}
   .btn-primary{background:var(--jade);color:#fff;}
   .btn-primary:active{background:var(--jade-deep);}
   .btn-primary:disabled{background:#a9c4c0;}
   .btn-ghost{background:var(--surface);color:var(--jade);border:1.5px solid var(--line);}
   .btn-danger{background:#fdecec;color:var(--danger);border:1.5px solid #f3cccc;}
-  .btn-sm{padding:11px;font-size:14px;border-radius:11px;}
+  .btn-sm{padding:9px 13px;font-size:13.5px;border-radius:10px;}
   .btn-row{display:flex;gap:10px;margin-top:8px;}
   .btn-row .btn{flex:1;}
 
@@ -370,10 +370,10 @@ const uid = ()=> (Date.now().toString(36)+Math.random().toString(36).slice(2,9))
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function money(minor,cur){const v=(minor/100);return CUR_SYM[cur]+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
 function todayISO(){const d=new Date();const o=d.getTimezoneOffset();return new Date(d-o*60000).toISOString().slice(0,10);}
-function fmtDate(iso){if(!iso)return"";const [y,m,d]=iso.split("-");return `${d}/${m}/${y}`;}
 const MONTHS_ABBR=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-function fmtDateText(iso){if(!iso)return"Pick a date";const [y,m,d]=iso.split("-");return `${+d} ${MONTHS_ABBR[+m-1]||""} ${y}`;}
-function fmtDateShort(iso){if(!iso)return"";const [y,m,d]=iso.split("-");return `${d}/${m}/${y.slice(2)}`;}
+function fmtDate(iso){if(!iso)return"";const [y,m,d]=iso.split("-");return `${+d} ${MONTHS_ABBR[+m-1]||""} ${y}`;}
+function fmtDateShort(iso){if(!iso)return"";const [y,m,d]=iso.split("-");return `${+d} ${MONTHS_ABBR[+m-1]||""} ${y}`;}
+function fmtDateText(iso){if(!iso)return"Pick a date";return fmtDate(iso);}
 
 function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),2200);}
 
@@ -975,7 +975,7 @@ function renderEntryFormCompact(allTags, isEdit){
     </div>
 
     <button class="btn btn-primary" id="cSave" style="margin-top:2px;">${isEdit?"Save changes":"Save entry"}</button>
-    ${isEdit?`<button class="btn btn-danger btn-sm" id="cDelete" style="margin-top:8px;">Delete entry</button>`:""}
+    ${isEdit?`<button class="btn btn-danger" id="cDelete" style="margin-top:8px;">Delete entry</button>`:""}
   </div>`;
   const screen=openScreen(isEdit?"Edit entry":"New entry", body);
   wireCompactForm(screen,isEdit);
@@ -1106,12 +1106,12 @@ async function openDetail(id){
     <div class="section-label">Payment proof</div>
     ${proofHTML}
 
-    ${(e.type==='travel'&&e.location_lat!=null)?`<a class="btn btn-ghost btn-sm" href="https://www.google.com/maps?q=${e.location_lat},${e.location_lng}" target="_blank" rel="noopener" style="margin-top:12px;">View location on map</a>`:""}
+    ${(e.type==='travel'&&e.location_lat!=null)?`<a class="btn btn-ghost" href="https://www.google.com/maps?q=${e.location_lat},${e.location_lng}" target="_blank" rel="noopener" style="margin-top:12px;">View location on map</a>`:""}
 
     <button class="btn btn-ghost" id="editBtn" style="margin-top:22px;">Edit entry</button>
-    <button class="btn btn-ghost btn-sm" id="dupBtn" style="margin-top:10px;">Duplicate as new entry</button>
+    <button class="btn btn-ghost" id="dupBtn" style="margin-top:10px;">Duplicate as new entry</button>
     ${activeBe?`<div class="hint" style="margin-top:16px;">This entry is part of a submitted claim, so its status is set by that claim — not editable here. To change or remove it, open the claim and undo it first.</div>
-    <button class="btn btn-ghost btn-sm" id="goClaimBtn" style="margin-top:10px;">View claim</button>`:""}
+    <button class="btn btn-ghost" id="goClaimBtn" style="margin-top:10px;">View claim</button>`:""}
 
     ${edits.length?`<div class="section-label">Edit history</div>
       <div class="kv" style="padding:4px 15px;"><div class="edit-log">
@@ -1337,9 +1337,9 @@ async function openBatchDetail(batchId){
 
   let actionBtn="";
   if(pendingCount>0){
-    actionBtn=`<button class="btn btn-ghost btn-sm" id="allPaid" style="margin-top:10px;">Mark all pending as reimbursed</button>`;
+    actionBtn=`<button class="btn btn-ghost" id="allPaid" style="margin-top:10px;">Mark all pending as reimbursed</button>`;
   }else if(reimbursedCount>0){
-    actionBtn=`<button class="btn btn-ghost btn-sm" id="undoReimb" style="margin-top:10px;color:var(--danger);">Undo reimbursement</button>`;
+    actionBtn=`<button class="btn btn-ghost" id="undoReimb" style="margin-top:10px;color:var(--danger);">Undo reimbursement</button>`;
   }
 
   const body=`
@@ -1579,7 +1579,7 @@ function companyForm(done,existing){
     <div class="field"><label>Default currency</label>
       <select id="cCur">${CURRENCIES.map(c=>`<option ${((existing?.default_currency)||state.defaultCurrency)===c?'selected':''}>${c}</option>`).join("")}</select></div>
     <button class="btn btn-primary" id="cSave">${isEdit?"Save":"Add company"}</button>
-    ${isEdit?`<button class="btn btn-danger btn-sm" id="cDel" style="margin-top:10px;">Delete company</button>`:""}`);
+    ${isEdit?`<button class="btn btn-danger" id="cDel" style="margin-top:10px;">Delete company</button>`:""}`);
   $("#cSave").addEventListener("click",async()=>{
     const name=$("#cName").value.trim();if(!name){toast("Enter a name");return;}
     const rec=existing?{...existing,name,default_currency:$("#cCur").value}
