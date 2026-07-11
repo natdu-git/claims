@@ -185,7 +185,7 @@
   /* image cropper */
   .cropper-ov{position:fixed;inset:0;background:rgba(24,22,20,.94);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;}
   .cropper-title{color:#f2f0e9;font-size:13px;opacity:.85;text-align:center;}
-  .cropper-stage{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;line-height:0;}
+  .cropper-stage{position:relative;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;line-height:0;}
   .cropper-stage img{display:block;-webkit-user-drag:none;}
   .crop-box{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.5);box-sizing:border-box;cursor:move;}
   .crop-h{position:absolute;width:22px;height:22px;background:var(--jade);border:2px solid #fff;border-radius:50%;box-sizing:border-box;}
@@ -878,23 +878,12 @@ function renderEntryFormCompact(allTags, isEdit){
   const isTravel=d.type==="travel";
   const body=`
   <div class="cform">
-    <div class="type-switch-row">
-      <div class="switch" id="cType">
-        <button type="button" data-t="expense" class="${isTravel?"":"on"}">Expense</button>
-        <button type="button" data-t="travel" class="${isTravel?"on":""}">Travel</button>
-      </div>
-    </div>
-    <div class="field nomb">
-      <label>Company <span class="req">*</span></label>
-      <select id="cCompany">${state.companies.map(c=>`<option value="${c.id}" ${c.id===d.company_id?"selected":""}>${esc(c.name)}</option>`).join("")}</select>
-    </div>
-
     <div class="frow">
       <div class="field nomb">
-        <label id="cAmtLabel">${isTravel?'Toll <span class="opt">(opt)</span>':'Amount <span class="req">*</span>'}</label>
-        <div class="amount-row">
-          <input type="number" inputmode="decimal" id="cAmount" placeholder="0.00" value="${esc(d.amount_str||"")}">
-          <select id="cCur">${CURRENCIES.map(c=>`<option ${c===d.currency?"selected":""}>${c}</option>`).join("")}</select>
+        <label>Type</label>
+        <div class="switch" id="cType">
+          <button type="button" data-t="expense" class="${isTravel?"":"on"}">Expense</button>
+          <button type="button" data-t="travel" class="${isTravel?"on":""}">Travel</button>
         </div>
       </div>
       <div class="field nomb">
@@ -903,9 +892,23 @@ function renderEntryFormCompact(allTags, isEdit){
       </div>
     </div>
 
-    <div class="field nomb ${isTravel?"hidden":""}" id="cVendorCell">
-      <label>Vendor <span class="opt">(optional)</span></label>
-      <input type="text" id="cVendor" placeholder="Who you paid" value="${esc(d.vendor)}">
+    <div class="field nomb">
+      <label>Company <span class="req">*</span></label>
+      <select id="cCompany">${state.companies.map(c=>`<option value="${c.id}" ${c.id===d.company_id?"selected":""}>${esc(c.name)}</option>`).join("")}</select>
+    </div>
+
+    <div class="frow">
+      <div class="field nomb ${isTravel?"hidden":""}" id="cVendorCell">
+        <label>Vendor <span class="opt">(optional)</span></label>
+        <input type="text" id="cVendor" placeholder="Who you paid" value="${esc(d.vendor)}">
+      </div>
+      <div class="field nomb">
+        <label id="cAmtLabel">${isTravel?'Toll <span class="opt">(opt)</span>':'Amount <span class="req">*</span>'}</label>
+        <div class="amount-row">
+          <input type="number" inputmode="decimal" id="cAmount" placeholder="0.00" value="${esc(d.amount_str||"")}">
+          <select id="cCur">${CURRENCIES.map(c=>`<option ${c===d.currency?"selected":""}>${c}</option>`).join("")}</select>
+        </div>
+      </div>
     </div>
 
     <div class="field nomb ${isTravel?"":"hidden"}" id="cLocCell">
@@ -916,21 +919,20 @@ function renderEntryFormCompact(allTags, isEdit){
       </div>
     </div>
 
-    <div class="frow ${isTravel?"hidden":""}" id="cTagsNotes">
-      <div class="field nomb" id="cTagsCell">
-        <label>Tags <span class="opt">(optional)</span></label>
-        <div class="picker-list" id="cTags"></div>
-      </div>
-      <div class="field nomb" id="cNotesCell">
-        <label>Notes <span class="opt">(optional)</span></label>
-        <textarea id="cNotes" placeholder="Optional" style="min-height:42px;">${esc(d.notes)}</textarea>
-      </div>
+    <div class="field nomb ${isTravel?"hidden":""}" id="cNotesCell">
+      <label>Notes <span class="opt">(optional)</span></label>
+      <textarea id="cNotes" placeholder="Optional" style="min-height:42px;">${esc(d.notes)}</textarea>
     </div>
 
     <div class="field nomb">
       <label>Payment proof <span class="opt">(optional)</span></label>
       <div class="proofs" id="cProofs"></div>
       <input type="file" id="cFile" accept="image/*,application/pdf" multiple capture="environment" class="hidden">
+    </div>
+
+    <div class="field nomb ${isTravel?"hidden":""}" id="cTagsCell">
+      <label>Tags <span class="opt">(optional)</span></label>
+      <div class="picker-list" id="cTags"></div>
     </div>
 
     <button class="btn btn-primary" id="cSave" style="margin-top:2px;">${isEdit?"Save changes":"Save entry"}</button>
@@ -944,7 +946,8 @@ function wireCompactForm(screen,isEdit){
   function applyType(){
     const isTravel=d.type==="travel";
     q("#cVendorCell").classList.toggle("hidden",isTravel);
-    q("#cTagsNotes").classList.toggle("hidden",isTravel);
+    q("#cNotesCell").classList.toggle("hidden",isTravel);
+    q("#cTagsCell").classList.toggle("hidden",isTravel);
     q("#cLocCell").classList.toggle("hidden",!isTravel);
     q("#cAmtLabel").innerHTML=isTravel?'Toll <span class="opt">(opt)</span>':'Amount <span class="req">*</span>';
     q("#cAmount").placeholder=isTravel?"0.00 (optional)":"0.00";
