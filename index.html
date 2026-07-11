@@ -1312,28 +1312,109 @@ async function openBatchDetail(batchId){
     </div>`;
   }).join("");
 
+  const pendingCount=items.filter(i=>i.outcome==="pending").length;
+  const reimbursedCount=items.filter(i=>i.outcome==="reimbursed").length;
+
+  const reimbInfo = batch.reimbursed_date
+    ? `<div class="r"><span class="k">Reimbursed on</span><span class="v">${fmtDate(batch.reimbursed_date)}</span></div>` : "";
+  const slipBlock = batch.reimburse_proof
+    ? `<div class="section-label">Payment slip</div>
+       <div class="proofs"><div class="proof-thumb" id="rbSlipThumb" style="cursor:pointer;"><img src="${batch.reimburse_proof}"></div></div>
+       <div class="hint" style="margin-bottom:6px;">Tap the slip to view full size.</div>` : "";
+
+  let actionBtn="";
+  if(pendingCount>0){
+    actionBtn=`<button class="btn btn-ghost btn-sm" id="allPaid" style="margin-top:10px;">Mark all pending as reimbursed</button>`;
+  }else if(reimbursedCount>0){
+    actionBtn=`<button class="btn btn-ghost btn-sm" id="undoReimb" style="margin-top:10px;color:var(--danger);">Undo reimbursement</button>`;
+  }
+
   const body=`
     <div class="kv">
       <div class="r"><span class="k">Company</span><span class="v">${esc(companyName(batch.company_id))}</span></div>
       <div class="r"><span class="k">Submitted</span><span class="v">${fmtDate(batch.submitted_date)}</span></div>
       <div class="r"><span class="k">Date range</span><span class="v">${fmtDateShort(batch.range_start)} – ${fmtDateShort(batch.range_end)}</span></div>
       <div class="r"><span class="k">Total claimed</span><span class="v mono">${Object.keys(tot).map(c=>money(tot[c],c)).join(" · ")}</span></div>
+      ${reimbInfo}
     </div>
+    ${slipBlock}
     <div class="hint" style="margin-bottom:6px;">Tap an item to mark it reimbursed or rejected. Rejected items go back to Unclaimed for a future claim.</div>
     <div class="section-label">Items</div>
     ${rows}
     <button class="btn btn-primary" id="claimSheetBtn" style="margin-top:20px;">Claim sheet with photos (PDF)</button>
     <button class="btn btn-ghost" id="csvBtn" style="margin-top:10px;">Download CSV (text only)</button>
-    <button class="btn btn-ghost btn-sm" id="allPaid" style="margin-top:10px;">Mark all pending as reimbursed</button>
+    ${actionBtn}
   `;
   const sc=openScreen("Claim detail", body);
   sc.querySelectorAll(".claim-row").forEach(r=>r.addEventListener("click",()=>itemOutcomeSheet(r.dataset.be,r.dataset.entry,batchId)));
   sc.querySelector("#claimSheetBtn").addEventListener("click",()=>exportClaimSheet(batchId));
   sc.querySelector("#csvBtn").addEventListener("click",()=>exportBatchCSV(batchId));
-  sc.querySelector("#allPaid").addEventListener("click",async()=>{
-    for(const be of items){ if(be.outcome==="pending"){ be.outcome="reimbursed";be.outcome_updated_at=Date.now();await DB.put("batch_entries",be);
-      const e=state.entries.find(x=>x.id===be.entry_id); if(e){e.status="reimbursed";await DB.put("entries",e);} } }
-    await loadAll();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("Marked reimbursed");
+  const slipThumb=sc.querySelector("#rbSlipThumb"); if(slipThumb) slipThumb.addEventListener("click",()=>viewImage(batch.reimburse_proof));
+  const allPaidBtn=sc.querySelector("#allPaid"); if(allPaidBtn) allPaidBtn.addEventListener("click",()=>reimburseBatchSheet(batchId,items,sc));
+  const undoBtn=sc.querySelector("#undoReimb"); if(undoBtn) undoBtn.addEventListener("click",()=>undoReimbursement(batchId,sc));
+}
+
+function viewImage(src){
+  const ov=document.createElement("div");
+  ov.style.cssText="position:fixed;inset:0;background:rgba(24,22,20,.94);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;";
+  ov.innerHTML=`<img src="${src}" style="max-width:100%;max-height:100%;border-radius:6px;">`;
+  ov.addEventListener("click",()=>ov.remove());
+  document.body.appendChild(ov);
+}
+
+// Batch-level reimbursement: capture the date + an optional payment-slip photo,
+// then mark all pending items reimbursed. Slip is stored as a base64 data URL on
+// the batch record so it travels inside JSON backups.
+function reimburseBatchSheet(batchId,items,sc){
+  openSheet(`<h3>Mark batch reimbursed</h3>
+    <div class="field nomb" style="margin-bottom:12px;">
+      <label>Reimbursement date <span class="req">*</span></label>
+      <input type="date" id="rbDate" value="${todayISO()}" max="${todayISO()}">
+    </div>
+    <div class="field nomb" style="margin-bottom:14px;">
+      <label>Payment slip <span class="opt">(optional)</span></label>
+      <div id="rbProofWrap"><button class="btn btn-ghost btn-sm" id="rbPick">Upload slip image</button></div>
+      <input type="file" id="rbFile" accept="image/*" capture="environment" class="hidden">
+    </div>
+    <button class="btn btn-primary" id="rbConfirm">Confirm reimbursed</button>
+    <button class="btn btn-ghost" id="rbCancel" style="margin-top:10px;">Cancel</button>`);
+  let slipUrl=null, slipType=null;
+  const q=s=>document.querySelector(s);
+  q("#rbPick").addEventListener("click",()=>q("#rbFile").click());
+  q("#rbFile").addEventListener("change",function(){
+    const f=this.files&&this.files[0]; if(!f)return;
+    const r=new FileReader();
+    r.onload=()=>{ slipUrl=String(r.result); slipType=f.type; q("#rbProofWrap").innerHTML=`<div class="proofs"><div class="proof-thumb"><img src="${slipUrl}"></div></div>`; };
+    r.readAsDataURL(f);
+  });
+  q("#rbCancel").addEventListener("click",closeSheet);
+  q("#rbConfirm").addEventListener("click",async()=>{
+    const date=q("#rbDate").value;
+    if(!date){ toast("Choose a date"); return; }
+    const batch=await DB.get("batches",batchId);
+    batch.reimbursed_date=date; batch.reimbursed_at=Date.now();
+    batch.reimburse_proof=slipUrl; batch.reimburse_proof_type=slipType;
+    await DB.put("batches",batch);
+    for(const be of items){ if(be.outcome==="pending"){ be.outcome="reimbursed"; be.outcome_updated_at=Date.now(); await DB.put("batch_entries",be);
+      const e=state.entries.find(x=>x.id===be.entry_id); if(e){ e.status="reimbursed"; await DB.put("entries",e); } } }
+    await loadAll(); closeSheet(); closeScreen(sc); setTimeout(()=>openBatchDetail(batchId),260); toast("Batch marked reimbursed");
+  });
+}
+
+function undoReimbursement(batchId,sc){
+  openSheet(`<h3>Undo reimbursement?</h3>
+    <p class="hint" style="margin-bottom:14px;">Reverts reimbursed items in this batch back to Pending (entries return to Submitted) and clears the reimbursement date and slip, so you can revise and re-confirm.</p>
+    <button class="btn btn-danger" id="undoYes">Undo reimbursement</button>
+    <button class="btn btn-ghost" id="undoNo" style="margin-top:10px;">Cancel</button>`);
+  document.querySelector("#undoNo").addEventListener("click",closeSheet);
+  document.querySelector("#undoYes").addEventListener("click",async()=>{
+    const batch=await DB.get("batches",batchId);
+    delete batch.reimbursed_date; delete batch.reimbursed_at; delete batch.reimburse_proof; delete batch.reimburse_proof_type;
+    await DB.put("batches",batch);
+    const items=await DB.getByIndex("batch_entries","batch_id",batchId);
+    for(const be of items){ if(be.outcome==="reimbursed"){ be.outcome="pending"; be.outcome_updated_at=Date.now(); await DB.put("batch_entries",be);
+      const e=state.entries.find(x=>x.id===be.entry_id); if(e){ e.status="submitted"; await DB.put("entries",e); } } }
+    await loadAll(); closeSheet(); closeScreen(sc); setTimeout(()=>openBatchDetail(batchId),260); toast("Reimbursement undone");
   });
 }
 
