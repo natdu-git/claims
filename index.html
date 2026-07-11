@@ -38,7 +38,7 @@
     font-size:16px;
     line-height:1.4;
     -webkit-font-smoothing:antialiased;
-    padding-bottom:calc(84px + var(--safe-b));
+    padding-bottom:calc(62px + var(--safe-b));
   }
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
   input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink);}
@@ -103,14 +103,14 @@
   .tabbar{
     position:fixed;left:0;right:0;bottom:0;z-index:30;
     background:var(--surface);border-top:1px solid var(--line);
-    display:flex;padding:6px 6px calc(6px + var(--safe-b));
+    display:flex;padding:3px 6px calc(3px + var(--safe-b));
   }
-  .tabbar button{flex:1;padding:8px 4px;font-size:11px;font-weight:600;color:var(--slate);display:flex;flex-direction:column;align-items:center;gap:3px;border-radius:10px;}
+  .tabbar button{flex:1;padding:4px 4px;font-family:var(--sans);font-size:10px;font-weight:500;color:var(--slate);display:flex;flex-direction:column;align-items:center;gap:1px;border-radius:8px;line-height:1.1;}
   .tabbar button.active{color:var(--jade);}
-  .tabbar button svg{width:22px;height:22px;}
+  .tabbar button svg{width:18px;height:18px;}
   .fab{
-    position:fixed;right:18px;bottom:calc(74px + var(--safe-b));z-index:31;
-    width:58px;height:58px;border-radius:18px;background:var(--jade);color:#fff;
+    position:fixed;right:18px;bottom:calc(54px + var(--safe-b));z-index:31;
+    width:52px;height:52px;border-radius:16px;background:var(--jade);color:#fff;
     box-shadow:0 8px 22px rgba(15,118,110,.4);
     display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:300;
   }
@@ -242,7 +242,7 @@
   .batch-card .bstat{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;}
   .mini-tag{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;}
 
-  .toast{position:fixed;left:50%;bottom:calc(90px + var(--safe-b));transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:600;z-index:100;opacity:0;transition:opacity .2s, transform .2s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.25);}
+  .toast{position:fixed;left:50%;bottom:calc(72px + var(--safe-b));transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:600;z-index:100;opacity:0;transition:opacity .2s, transform .2s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.25);}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
 
   .modal-back{position:fixed;inset:0;background:rgba(15,20,25,.5);z-index:60;display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:opacity .2s;}
