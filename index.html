@@ -6,7 +6,8 @@
 <meta name="theme-color" content="#16202b">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Ledger</title>
+<meta name="apple-mobile-web-app-title" content="Claims">
+<title>Claims</title>
 <style>
   :root{
     --ink:#1f1e1d;
@@ -273,7 +274,7 @@
 <!-- ===== HOME ===== -->
 <div class="topbar">
   <div class="topbar-row">
-    <div class="brand"><span class="dot"></span> Ledger</div>
+    <div class="brand"><span class="dot"></span> Claims</div>
     <button class="topbtn" id="summaryBtn">Summary</button>
   </div>
   <div class="owed-label" id="owedLabel">Outstanding — submitted, not yet reimbursed</div>
@@ -317,7 +318,7 @@
 <script>
 "use strict";
 /* ============================================================
-   Ledger — personal multi-company expense tracker
+   Claims — personal multi-company expense tracker
    Local-first: all data in IndexedDB on this device.
    ============================================================ */
 
@@ -1402,7 +1403,7 @@ function openSettings(){
     </div>
 
     <div class="section-label">About</div>
-    <div class="hint">Ledger · a personal, offline expense tracker. ${state.entries.length} entries · ${state.companies.length} companies stored locally.</div>
+    <div class="hint">Claims · a personal, offline expense tracker. ${state.entries.length} entries · ${state.companies.length} companies stored locally.</div>
   `;
   const sc=openScreen("More", body);
   sc.querySelector("#sCompanies").addEventListener("click",()=>openCompanies(false));
@@ -1461,7 +1462,7 @@ function importBackup(){
     let data;
     try{ data=JSON.parse(await f.text()); }
     catch(e){ toast("Couldn't read that file"); return; }
-    if(!data || !Array.isArray(data.entries)){ toast("Not a Ledger backup"); return; }
+    if(!data || !Array.isArray(data.entries)){ toast("Not a Claims backup"); return; }
     const counts=`${data.entries.length} entries · ${(data.companies||[]).length} companies · ${(data.proofs||[]).length} receipts`;
     openSheet(`<h3>Restore this backup?</h3>
       <p class="hint" style="margin-bottom:14px;">This <strong>replaces everything</strong> currently in the app with the backup contents:<br>${counts}.<br><br>Best used on a fresh install or to recover lost data.</p>
