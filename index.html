@@ -1670,9 +1670,21 @@ $$(".tabbar button").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.
 /* ============================================================
    Boot
    ============================================================ */
+// Ask the browser to keep our data safe from automatic eviction.
+// Runs in the background; never blocks startup and fails quietly if unsupported.
+async function requestPersistentStorage(){
+  try{
+    if(navigator.storage && navigator.storage.persist){
+      const already = await navigator.storage.persisted();
+      if(!already){ await navigator.storage.persist(); }
+    }
+  }catch(e){ /* older browsers: ignore, data still saves normally */ }
+}
+
 (async function boot(){
   try{
     await DB.open();
+    requestPersistentStorage();
     await loadAll();
     await renderHome();
     if(state.companies.length===0){ setTimeout(()=>openCompanies(true),400); }
