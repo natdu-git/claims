@@ -182,6 +182,17 @@
   .add-proof{width:78px;height:78px;border-radius:11px;border:1.5px dashed var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--slate);font-size:11px;font-weight:600;}
   .add-proof .plus{font-size:22px;font-weight:300;line-height:1;}
 
+  /* image cropper */
+  .cropper-ov{position:fixed;inset:0;background:rgba(24,22,20,.94);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;}
+  .cropper-title{color:#f2f0e9;font-size:13px;opacity:.85;text-align:center;}
+  .cropper-stage{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;line-height:0;}
+  .cropper-stage img{display:block;-webkit-user-drag:none;}
+  .crop-box{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.5);box-sizing:border-box;cursor:move;}
+  .crop-h{position:absolute;width:22px;height:22px;background:var(--jade);border:2px solid #fff;border-radius:50%;box-sizing:border-box;}
+  .crop-h.tl{left:-12px;top:-12px;} .crop-h.tr{right:-12px;top:-12px;}
+  .crop-h.bl{left:-12px;bottom:-12px;} .crop-h.br{right:-12px;bottom:-12px;}
+  .cropper-bar{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;}
+
   /* summary card */
   .summary{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:16px;}
   .summary .srow{display:flex;justify-content:space-between;gap:12px;padding:13px 15px;border-bottom:1px solid var(--line-soft);font-size:14.5px;}
@@ -711,11 +722,9 @@ function wireEntryForm(screen, allTags, isEdit){
     $$(".proof-thumb .del",pl).forEach(x=>x.addEventListener("click",()=>{d._proofs.splice(+x.dataset.i,1);renderProofs();}));
   }
   fileInput.addEventListener("change",()=>{
-    [...fileInput.files].forEach(f=>{
-      d._proofs.push({id:uid(), file_type:f.type, name:f.name, blob:f, _existing:false});
-    });
+    const files=[...fileInput.files];
     fileInput.value="";
-    renderProofs();
+    ingestProofs(files, renderProofs);
   });
   renderProofs();
 
@@ -953,7 +962,7 @@ function wireCompactForm(screen,isEdit){
   q("#cType").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;d.type=b.dataset.t;$$("#cType button",screen).forEach(x=>x.classList.toggle("on",x===b));applyType();});
   q("#cPin").addEventListener("click",()=>{if(!navigator.geolocation){toast("Geolocation not available");return;}q("#cPinTxt").textContent="Locating\u2026";navigator.geolocation.getCurrentPosition(pos=>{d.location_lat=pos.coords.latitude;d.location_lng=pos.coords.longitude;q("#cPinTxt").textContent="Pinned";toast("Location pinned");},()=>{q("#cPinTxt").textContent="Pin location";toast("Location permission denied");},{enableHighAccuracy:true,timeout:10000});});
   q("#cTags").addEventListener("click",async e=>{const b=e.target.closest(".tag");if(!b)return;if(b.id==="cAddTag"){const name=prompt("New tag name");if(name&&name.trim()){const nm=name.trim();await DB.put("tags",{name:nm});if(!d.tags.includes(nm))d.tags.push(nm);if(!cfTags.includes(nm))cfTags.push(nm);}renderTags();return;}const t=b.dataset.tag;if(d.tags.includes(t))d.tags=d.tags.filter(x=>x!==t);else d.tags.push(t);b.classList.toggle("on");});
-  q("#cFile").addEventListener("change",function(){[...this.files].forEach(f=>d._proofs.push({id:uid(),file_type:f.type,name:f.name,blob:f,_existing:false}));this.value="";renderProofs();});
+  q("#cFile").addEventListener("change",function(){ const files=[...this.files]; this.value=""; ingestProofs(files, renderProofs); });
   q("#cSave").addEventListener("click",async()=>{
     d.amount_str=q("#cAmount").value.trim();
     d.currency=q("#cCur").value;
@@ -1670,6 +1679,109 @@ $$(".tabbar button").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.
 /* ============================================================
    Boot
    ============================================================ */
+/* ============================================================
+   Image cropping
+   Opens a lightweight crop tool for a picked image and resolves
+   to a cropped Blob. Returns the original file if the user keeps
+   the full photo, or null if they cancel. PDFs never come here.
+   ============================================================ */
+function cropImage(file){
+  return new Promise(resolve=>{
+    const url=URL.createObjectURL(file);
+    const img=new Image();
+    img.onerror=()=>{ URL.revokeObjectURL(url); resolve(file); };
+    img.onload=()=>{
+      // Fit the image inside the screen while keeping aspect ratio.
+      const maxW=window.innerWidth*0.92, maxH=window.innerHeight*0.66;
+      const r=Math.min(maxW/img.naturalWidth, maxH/img.naturalHeight, 1);
+      const dispW=Math.max(1,Math.round(img.naturalWidth*r));
+      const dispH=Math.max(1,Math.round(img.naturalHeight*r));
+
+      const ov=document.createElement("div");
+      ov.className="cropper-ov";
+      ov.innerHTML=`
+        <div class="cropper-title">Drag the box to move · pull a corner to resize</div>
+        <div class="cropper-stage">
+          <img src="${url}" style="width:${dispW}px;height:${dispH}px;">
+          <div class="crop-box"><div class="crop-h tl"></div><div class="crop-h tr"></div><div class="crop-h bl"></div><div class="crop-h br"></div></div>
+        </div>
+        <div class="cropper-bar">
+          <button class="btn btn-ghost btn-sm" id="crFull">Use full photo</button>
+          <button class="btn btn-primary btn-sm" id="crDo">Crop &amp; use</button>
+        </div>
+        <div class="cropper-bar"><button class="btn btn-danger btn-sm" id="crCancel">Cancel</button></div>`;
+      document.body.appendChild(ov);
+
+      const box=ov.querySelector(".crop-box");
+      const MIN=32;
+      let cx=Math.round(dispW*0.1), cy=Math.round(dispH*0.1);
+      let cw=Math.round(dispW*0.8), ch=Math.round(dispH*0.8);
+      function apply(){ box.style.left=cx+"px"; box.style.top=cy+"px"; box.style.width=cw+"px"; box.style.height=ch+"px"; }
+      apply();
+
+      let mode=null, sx=0, sy=0, ox=0, oy=0, ow=0, oh=0;
+      function down(e,m){ e.preventDefault(); mode=m; sx=e.clientX; sy=e.clientY; ox=cx; oy=cy; ow=cw; oh=ch;
+        window.addEventListener("pointermove",move); window.addEventListener("pointerup",up); }
+      function move(e){
+        if(!mode) return;
+        const dx=e.clientX-sx, dy=e.clientY-sy;
+        if(mode==="move"){
+          cx=Math.min(Math.max(0,ox+dx), dispW-cw);
+          cy=Math.min(Math.max(0,oy+dy), dispH-ch);
+        }else{
+          let nx=ox, ny=oy, nw=ow, nh=oh;
+          if(mode.includes("l")){ nx=ox+dx; nw=ow-dx; }
+          if(mode.includes("r")){ nw=ow+dx; }
+          if(mode.includes("t")){ ny=oy+dy; nh=oh-dy; }
+          if(mode.includes("b")){ nh=oh+dy; }
+          if(nw<MIN){ if(mode.includes("l")) nx=ox+ow-MIN; nw=MIN; }
+          if(nh<MIN){ if(mode.includes("t")) ny=oy+oh-MIN; nh=MIN; }
+          if(nx<0){ nw+=nx; nx=0; }
+          if(ny<0){ nh+=ny; ny=0; }
+          if(nx+nw>dispW) nw=dispW-nx;
+          if(ny+nh>dispH) nh=dispH-ny;
+          cx=nx; cy=ny; cw=nw; ch=nh;
+        }
+        apply();
+      }
+      function up(){ mode=null; window.removeEventListener("pointermove",move); window.removeEventListener("pointerup",up); }
+      box.addEventListener("pointerdown",e=>{ if(e.target.classList.contains("crop-h")) return; down(e,"move"); });
+      box.querySelector(".tl").addEventListener("pointerdown",e=>down(e,"tl"));
+      box.querySelector(".tr").addEventListener("pointerdown",e=>down(e,"tr"));
+      box.querySelector(".bl").addEventListener("pointerdown",e=>down(e,"bl"));
+      box.querySelector(".br").addEventListener("pointerdown",e=>down(e,"br"));
+
+      function cleanup(){ window.removeEventListener("pointermove",move); window.removeEventListener("pointerup",up); ov.remove(); URL.revokeObjectURL(url); }
+      ov.querySelector("#crCancel").addEventListener("click",()=>{ cleanup(); resolve(null); });
+      ov.querySelector("#crFull").addEventListener("click",()=>{ cleanup(); resolve(file); });
+      ov.querySelector("#crDo").addEventListener("click",()=>{
+        const scale=img.naturalWidth/dispW; // display px -> natural px
+        const sw=Math.max(1,Math.round(cw*scale)), sh=Math.max(1,Math.round(ch*scale));
+        const canvas=document.createElement("canvas"); canvas.width=sw; canvas.height=sh;
+        const ctx=canvas.getContext("2d");
+        ctx.drawImage(img, Math.round(cx*scale), Math.round(cy*scale), sw, sh, 0, 0, sw, sh);
+        canvas.toBlob(b=>{ cleanup(); resolve(b||file); }, "image/jpeg", 0.9);
+      });
+    };
+    img.src=url;
+  });
+}
+
+// Add picked files to the current draft's proofs. Images pass through the
+// cropper first; PDFs are stored as-is. rerender() refreshes the thumbnails.
+async function ingestProofs(files, rerender){
+  for(const f of files){
+    if(f.type && f.type.startsWith("image")){
+      const blob=await cropImage(f);
+      if(!blob) continue; // user cancelled this image
+      draft._proofs.push({id:uid(), file_type:blob.type||f.type, name:f.name, blob, _existing:false});
+    }else{
+      draft._proofs.push({id:uid(), file_type:f.type, name:f.name, blob:f, _existing:false});
+    }
+    rerender();
+  }
+}
+
 // Ask the browser to keep our data safe from automatic eviction.
 // Runs in the background; never blocks startup and fails quietly if unsupported.
 async function requestPersistentStorage(){
