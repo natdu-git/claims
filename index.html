@@ -77,16 +77,19 @@
   }
   .row:active{background:#f6f8fa;}
   .row .accent{width:5px;flex:none;}
-  .row .body{flex:1;min-width:0;padding:13px 14px;display:flex;align-items:center;gap:12px;}
+  .row .body{flex:1;min-width:0;padding:13px 14px;display:flex;align-items:flex-start;gap:12px;}
   .row .main{flex:1;min-width:0;}
   .row .vendor{font-weight:600;font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .row .meta{font-size:12.5px;color:var(--slate);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .row .meta .type-badge{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:4px;margin-right:7px;vertical-align:1px;}
+  .row .type-badge{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:4px;margin-bottom:4px;}
   .type-travel{background:#e5f3f1;color:var(--jade-deep);}
   .type-expense{background:#eef0f2;color:var(--ink-soft);}
   .row .amt{text-align:right;flex:none;}
   .row .amt .n{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:16px;letter-spacing:-.02em;}
   .row .amt .cur{font-size:10.5px;color:var(--slate);font-weight:600;letter-spacing:.05em;margin-top:2px;}
+  .row .amt .st-word-unclaimed{color:var(--slate);}
+  .row .amt .st-word-submitted{color:var(--amber);}
+  .row .amt .st-word-reimbursed{color:var(--green);}
   .row .flags{margin-top:4px;font-size:11px;}
   .noproof{color:var(--amber);font-weight:600;}
 
@@ -583,13 +586,14 @@ async function renderLog(){
       <div class="body">
         <div class="main">
           <div class="vendor">${esc(e.vendor||e.location_label||companyName(e.company_id))}</div>
-          <div class="meta"><span class="type-badge type-${e.type}">${e.type}</span>${esc(companyName(e.company_id))}</div>
+          <div class="meta">${esc(companyName(e.company_id))}</div>
           ${e.tags&&e.tags.length?`<div class="row-tags">${[...e.tags].sort((a,b)=>a.localeCompare(b)).slice(0,4).map(esc).join(", ")}${e.tags.length>4?`, +${e.tags.length-4}`:""}</div>`:""}
-          ${noProof&&!(e.type==='travel'&&e.amount_minor===0)?`<div class="flags"><span class="noproof">⚠ no proof</span></div>`:""}
         </div>
         <div class="amt">
+          <span class="type-badge type-${e.type}">${e.type}</span>
           <div class="n">${e.type==='travel'&&e.amount_minor===0?'—':money(e.amount_minor,e.currency)}</div>
-          <div class="cur">${e.type==='travel'&&e.amount_minor===0?STATUS_LABEL[e.status]:e.currency+' · '+STATUS_LABEL[e.status]}</div>
+          <div class="cur">${e.type==='travel'&&e.amount_minor===0?`<span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`:`${e.currency} · <span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`}</div>
+          ${noProof&&!(e.type==='travel'&&e.amount_minor===0)?`<div class="flags"><span class="noproof">⚠ no proof</span></div>`:""}
         </div>
       </div>
     </div>`;
