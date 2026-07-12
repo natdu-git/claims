@@ -94,6 +94,7 @@
   .st-unclaimed{background:var(--slate);}
   .st-submitted{background:var(--amber);}
   .st-reimbursed{background:var(--green);}
+  .st-rejected{background:var(--danger);}
 
   .empty{text-align:center;color:var(--slate);padding:60px 30px;}
   .empty h3{color:var(--ink);font-weight:600;margin:0 0 6px;}
@@ -101,10 +102,11 @@
 
   /* ---------- Bottom nav + FAB ---------- */
   .tabbar{
-    position:fixed;left:0;right:0;bottom:0;z-index:30;
+    position:fixed;left:0;right:0;bottom:0;z-index:45;
     background:var(--surface);border-top:1px solid var(--line);
     display:flex;padding:3px 6px calc(3px + var(--safe-b));
   }
+  body.form-open .tabbar{display:none;}
   .tabbar button{flex:1;padding:4px 4px;font-family:var(--sans);font-size:10px;font-weight:500;color:var(--slate);display:flex;flex-direction:column;align-items:center;gap:1px;border-radius:8px;line-height:1.1;}
   .tabbar button.active{color:var(--jade);}
   .tabbar button svg{width:18px;height:18px;}
@@ -132,7 +134,7 @@
   .screen-head h2{font-size:17px;font-weight:700;margin:0;flex:1;text-align:center;}
   .screen-head .right{min-width:64px;text-align:right;}
   .screen-head .right button{color:var(--jade);font-weight:700;font-size:15px;padding:4px 6px;}
-  .screen-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:13px 14px calc(40px + var(--safe-b));}
+  .screen-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:13px 14px calc(70px + var(--safe-b));}
 
   /* ---------- Form ---------- */
   .field{margin-bottom:12px;}
@@ -155,6 +157,9 @@
   .lrow .lctl input[type=text]{text-align:right;}
   .lctl .tag-search{text-align:left;}
   .lbreak{border-top:1px solid var(--line);}
+  #backupBanner{display:none;}
+  .bkp-inner{display:flex;align-items:center;gap:10px;justify-content:space-between;background:#fbe7e2;border:1px solid #e9c3b6;color:#8a3b22;border-radius:11px;padding:9px 12px;margin:10px 14px 0;font-size:12.5px;line-height:1.35;}
+  .bkp-inner button{background:var(--jade);color:#fff;border-radius:8px;padding:7px 13px;font-size:12.5px;font-weight:600;white-space:nowrap;flex:none;}
   .date-wrap{position:relative;}
   .date-text{display:block;width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:16px;color:var(--ink);}
   .date-overlay{position:absolute;inset:0;width:100%;height:100%;opacity:0;}
@@ -245,6 +250,11 @@
   .status-tag.st-unclaimed-c{background:#eef1f4;color:var(--slate);}
   .status-tag.st-submitted-c{background:#fdf0e0;color:var(--amber);}
   .status-tag.st-reimbursed-c{background:#e6f4ea;color:var(--green);}
+  /* shared status colours (used by status-tag and mini-tag) */
+  .st-unclaimed-c{background:#eef1f4;color:var(--slate);}
+  .st-submitted-c{background:#fdf0e0;color:var(--amber);}
+  .st-reimbursed-c{background:#e6f4ea;color:var(--green);}
+  .st-rejected-c{background:#fbe9e6;color:var(--danger);}
 
   .kv{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-bottom:16px;overflow:hidden;}
   .kv .r{display:flex;justify-content:space-between;gap:12px;padding:13px 15px;border-bottom:1px solid var(--line-soft);font-size:14.5px;}
@@ -276,6 +286,16 @@
   .batch-card .bh .bd{font-size:12.5px;color:var(--slate);}
   .batch-card .bstat{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;}
   .mini-tag{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;}
+  .row-tags{font-size:11px;color:var(--slate);margin-top:2px;line-height:1.3;}
+  .tp-list{display:flex;flex-direction:column;gap:0;max-height:44vh;overflow-y:auto;border:1px solid var(--line);border-radius:12px;margin-top:8px;}
+  .tp-item{display:flex;width:100%;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line-soft);font-size:15px;text-align:left;color:var(--ink);}
+  .tp-item:last-child{border-bottom:none;}
+  .tp-item.on{color:var(--jade);font-weight:600;}
+  .tp-check{color:var(--jade);font-weight:800;}
+  .tp-sort{display:flex;gap:6px;}
+  .tp-sort button{flex:1;padding:7px 6px;border:1px solid var(--line);border-radius:9px;font-size:12.5px;font-weight:500;color:var(--ink-soft);background:var(--surface);}
+  .tp-sort button.on{border-color:var(--jade);background:#effaf8;color:var(--jade-deep);}
+  .tag-empty{font-size:12.5px;color:var(--slate);}
 
   .toast{position:fixed;left:50%;bottom:calc(72px + var(--safe-b));transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:600;z-index:100;opacity:0;transition:opacity .2s, transform .2s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.25);}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
@@ -290,6 +310,8 @@
   .list-choice button:last-child{border-bottom:none;}
   .list-choice button:active{background:#f6f8fa;}
   .list-choice .check{color:var(--jade);font-weight:800;}
+  .list-choice button.lc-current{color:var(--slate);background:var(--soft);cursor:default;font-weight:500;}
+  .lc-cur-tag{font-size:11px;font-weight:600;color:var(--slate);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
 
   .hint{font-size:12.5px;color:var(--slate);margin-top:7px;line-height:1.45;}
   /* ---------- Compact entry form (one screen, 2-up rows) ---------- */
@@ -328,6 +350,7 @@
   <div class="owed-sub" id="owedSub"></div>
 </div>
 
+<div id="backupBanner"></div>
 <div class="searchbar"><input type="search" id="searchInput" placeholder="Search vendor, tag, or note…" autocomplete="off"></div>
 <div class="filters" id="filters"></div>
 
@@ -457,6 +480,16 @@ async function loadAll(){
   state.entries = (await DB.getAll("entries"));
   const dc = await DB.get("meta","defaultCurrency");
   state.defaultCurrency = dc?.v || "THB";
+  const lb = await DB.get("meta","lastBackupAt");
+  state.lastBackupAt = lb?.v || 0;
+  // Work out whether anything changed since the last backup (for the reminder banner).
+  let newest=0;
+  state.entries.forEach(e=>{ newest=Math.max(newest, e.updated_at||0, e.created_at||0); });
+  state.companies.forEach(c=>{ newest=Math.max(newest, c.created_at||0); });
+  (await DB.getAll("batches")).forEach(b=>{ newest=Math.max(newest, b.created_at||0, b.reimbursed_at||0); });
+  (await DB.getAll("batch_entries")).forEach(be=>{ newest=Math.max(newest, be.outcome_updated_at||0); });
+  state.newestChange = newest;
+  state.hasData = state.entries.length>0 || state.companies.length>0;
 }
 function companyName(id){const c=state.companies.find(c=>c.id===id);return c?c.name:"—";}
 
@@ -480,7 +513,26 @@ async function renderHome(){
     sub.textContent=`${n} entr${n===1?"y":"ies"} awaiting reimbursement.`;
   }
   renderFilters();
+  renderBackupBanner();
   await renderLog();
+}
+
+function timeAgo(ts){
+  if(!ts) return "";
+  const s=Math.floor((Date.now()-ts)/1000);
+  if(s<60) return "just now";
+  const m=Math.floor(s/60); if(m<60) return m+" min ago";
+  const h=Math.floor(m/60); if(h<24) return h+"h ago";
+  const d=Math.floor(h/24); return d+" day"+(d>1?"s":"")+" ago";
+}
+function backupIsDue(){ return !!(state.hasData && (state.newestChange||0) > (state.lastBackupAt||0)); }
+function renderBackupBanner(){
+  const el=$("#backupBanner"); if(!el) return;
+  if(!backupIsDue()){ el.style.display="none"; el.innerHTML=""; return; }
+  const when = state.lastBackupAt ? `since your last backup ${timeAgo(state.lastBackupAt)}` : "and you haven’t backed up yet";
+  el.style.display="block";
+  el.innerHTML=`<div class="bkp-inner"><span>⚠ You have changes ${when} — keep a copy off this phone.</span><button id="bkpNow">Back up</button></div>`;
+  $("#bkpNow").addEventListener("click",exportBackup);
 }
 
 function renderFilters(){
@@ -532,6 +584,7 @@ async function renderLog(){
         <div class="main">
           <div class="vendor">${esc(e.vendor||e.location_label||companyName(e.company_id))}</div>
           <div class="meta"><span class="type-badge type-${e.type}">${e.type}</span>${esc(companyName(e.company_id))}</div>
+          ${e.tags&&e.tags.length?`<div class="row-tags">${[...e.tags].sort((a,b)=>a.localeCompare(b)).slice(0,4).map(esc).join(", ")}${e.tags.length>4?`, +${e.tags.length-4}`:""}</div>`:""}
           ${noProof&&!(e.type==='travel'&&e.amount_minor===0)?`<div class="flags"><span class="noproof">⚠ no proof</span></div>`:""}
         </div>
         <div class="amt">
@@ -562,8 +615,9 @@ function openScreen(title,bodyHTML,rightHTML=""){
   wrap.querySelector(".back").addEventListener("click",()=>closeScreen(wrap));
   return wrap;
 }
-function closeScreen(wrap){wrap.classList.remove("show");setTimeout(()=>wrap.remove(),240);}
+function closeScreen(wrap){wrap.classList.remove("show");setTimeout(()=>{wrap.remove();syncFormOpen();},240);}
 function closeTopScreen(){const s=$$("#screens .screen");if(s.length)closeScreen(s[s.length-1]);}
+function syncFormOpen(){ document.body.classList.toggle("form-open", !!$("#screens .screen.is-form")); }
 
 /* ---------- bottom sheet ---------- */
 function openSheet(html){$("#sheet").innerHTML=html;$("#sheetBack").classList.add("show");}
@@ -985,8 +1039,8 @@ function renderEntryFormCompact(allTags, isEdit){
     <div class="lrow tall ${isTravel?"hidden":""}" id="cTagsCell">
       <label>Tags <span class="opt">(optional)</span></label>
       <div class="lctl"><div>
-        <input type="text" id="cTagSearch" class="tag-search" placeholder="Search tags…" autocomplete="off">
-        <div class="picker-list" id="cTags"></div>
+        <div class="picker-list" id="cTagsSelected"></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="cTagsOpen" style="margin-top:6px;">Add / edit tags</button>
       </div></div>
     </div>
 
@@ -994,6 +1048,8 @@ function renderEntryFormCompact(allTags, isEdit){
     ${isEdit?`<button class="btn btn-danger" id="cDelete" style="margin-top:8px;">Delete entry</button>`:""}
   </div>`;
   const screen=openScreen(isEdit?"Edit entry":"New entry", body);
+  screen.classList.add("is-form");
+  syncFormOpen();
   wireCompactForm(screen,isEdit);
 }
 function wireCompactForm(screen,isEdit){
@@ -1007,35 +1063,52 @@ function wireCompactForm(screen,isEdit){
     q("#cAmtLabel").innerHTML=isTravel?'Toll <span class="opt">(opt)</span>':'Amount <span class="req">*</span>';
     q("#cAmount").placeholder=isTravel?"0.00 (optional)":"0.00";
   }
-  const tagFreq={};
-  (state.entries||[]).forEach(e=>(e.tags||[]).forEach(t=>{tagFreq[t]=(tagFreq[t]||0)+1;}));
-  let tagExpanded=false;
-  const TAG_LIMIT=8;
-  function orderedTags(){
-    return Array.from(new Set(cfTags)).sort((a,b)=>{
-      const sa=d.tags.includes(a)?1:0, sb=d.tags.includes(b)?1:0;
-      if(sa!==sb) return sb-sa;                 // selected tags first
-      const fa=tagFreq[a]||0, fb=tagFreq[b]||0;
-      if(fa!==fb) return fb-fa;                 // most-used next
-      return a.localeCompare(b);                // then alphabetical
-    });
+  // Tag usage stats for the picker's sort options.
+  const tagFreq={}, tagLastUsed={};
+  (state.entries||[]).forEach(e=>{ const t=e.created_at||0; (e.tags||[]).forEach(tag=>{ tagFreq[tag]=(tagFreq[tag]||0)+1; tagLastUsed[tag]=Math.max(tagLastUsed[tag]||0,t); }); });
+  let tagSort="used";
+  function tagsSorted(query){
+    let list=Array.from(new Set(cfTags));
+    if(query){ const ql=query.toLowerCase(); list=list.filter(t=>t.toLowerCase().includes(ql)); }
+    if(tagSort==="alpha") list.sort((a,b)=>a.localeCompare(b));
+    else if(tagSort==="recent") list.sort((a,b)=>((tagLastUsed[b]||0)-(tagLastUsed[a]||0))||a.localeCompare(b));
+    else list.sort((a,b)=>((tagFreq[b]||0)-(tagFreq[a]||0))||a.localeCompare(b));
+    return list;
   }
-  function renderTags(){
-    const qInput=q("#cTagSearch");
-    const query=(qInput?qInput.value:"").trim().toLowerCase();
-    let list=orderedTags();
-    if(query) list=list.filter(t=>t.toLowerCase().includes(query));
-    let shown=list, hidden=0;
-    if(!query && !tagExpanded && list.length>TAG_LIMIT){
-      const head=list.slice(0,TAG_LIMIT);
-      const selectedBeyond=list.slice(TAG_LIMIT).filter(t=>d.tags.includes(t));
-      shown=head.concat(selectedBeyond);
-      hidden=list.length-shown.length;
-    }
-    let html=shown.map(t=>`<button class="tag ${d.tags.includes(t)?"on":""}" data-tag="${esc(t)}">${esc(t)}</button>`).join("");
-    if(hidden>0) html+=`<button class="tag more" id="cTagMore">+ ${hidden} more</button>`;
-    html+=`<button class="tag add" id="cAddTag">+ New</button>`;
-    q("#cTags").innerHTML=html;
+  function renderTags(){ // shows the chosen tags in the form + opens the picker
+    const el=q("#cTagsSelected");
+    if(!d.tags.length){ el.innerHTML=`<span class="tag-empty">No tags yet</span>`; return; }
+    el.innerHTML=[...d.tags].sort((a,b)=>a.localeCompare(b)).map(t=>`<button type="button" class="tag on" data-tag="${esc(t)}">${esc(t)} ×</button>`).join("");
+    $$("#cTagsSelected .tag",screen).forEach(b=>b.addEventListener("click",()=>{ d.tags=d.tags.filter(x=>x!==b.dataset.tag); renderTags(); }));
+  }
+  function renderPickerList(){
+    const s=document.querySelector("#tpSearch");
+    const list=tagsSorted(s?s.value.trim():"");
+    const wrap=document.querySelector("#tpList");
+    wrap.innerHTML=list.length
+      ? list.map(t=>`<button type="button" class="tp-item ${d.tags.includes(t)?"on":""}" data-tag="${esc(t)}"><span>${esc(t)}</span><span class="tp-check">${d.tags.includes(t)?"✓":""}</span></button>`).join("")
+      : `<div class="hint" style="padding:12px;">No tags match.</div>`;
+    $$("#tpList .tp-item").forEach(b=>b.addEventListener("click",()=>{ const t=b.dataset.tag; if(d.tags.includes(t)) d.tags=d.tags.filter(x=>x!==t); else d.tags.push(t); renderPickerList(); }));
+  }
+  function openTagPicker(){
+    openSheet(`<h3>Tags</h3>
+      <input type="text" id="tpSearch" class="tag-search" placeholder="Search tags…" autocomplete="off" style="margin-bottom:8px;">
+      <div class="tp-sort" id="tpSort">
+        <button type="button" data-s="alpha" class="${tagSort==='alpha'?'on':''}">A–Z</button>
+        <button type="button" data-s="used" class="${tagSort==='used'?'on':''}">Most used</button>
+        <button type="button" data-s="recent" class="${tagSort==='recent'?'on':''}">Recently used</button>
+      </div>
+      <div class="tp-list" id="tpList"></div>
+      <button class="btn btn-ghost btn-sm" id="tpNew" style="margin-top:10px;">+ New tag</button>
+      <button class="btn btn-primary" id="tpDone" style="margin-top:10px;">Done</button>`);
+    renderPickerList();
+    document.querySelector("#tpSearch").addEventListener("input",renderPickerList);
+    $$("#tpSort button").forEach(b=>b.addEventListener("click",()=>{ tagSort=b.dataset.s; $$("#tpSort button").forEach(x=>x.classList.toggle("on",x===b)); renderPickerList(); }));
+    document.querySelector("#tpNew").addEventListener("click",async()=>{
+      const name=prompt("New tag name");
+      if(name&&name.trim()){ const nm=name.trim(); await DB.put("tags",{name:nm,created_at:Date.now()}); if(!cfTags.includes(nm))cfTags.push(nm); if(!d.tags.includes(nm))d.tags.push(nm); tagFreq[nm]=tagFreq[nm]||0; tagLastUsed[nm]=Date.now(); renderPickerList(); }
+    });
+    document.querySelector("#tpDone").addEventListener("click",()=>{ closeSheet(); renderTags(); });
   }
   function renderProofs(){
     const pl=q("#cProofs");
@@ -1046,8 +1119,7 @@ function wireCompactForm(screen,isEdit){
   q("#cCompany").addEventListener("change",e=>{d.company_id=e.target.value;const c=state.companies.find(x=>x.id===d.company_id);if(c&&c.default_currency){d.currency=c.default_currency;q("#cCur").value=c.default_currency;}});
   q("#cType").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;d.type=b.dataset.t;$$("#cType button",screen).forEach(x=>x.classList.toggle("on",x===b));applyType();});
   q("#cPin").addEventListener("click",()=>{if(!navigator.geolocation){toast("Geolocation not available");return;}q("#cPinTxt").textContent="Locating\u2026";navigator.geolocation.getCurrentPosition(pos=>{d.location_lat=pos.coords.latitude;d.location_lng=pos.coords.longitude;q("#cPinTxt").textContent="Pinned";toast("Location pinned");},()=>{q("#cPinTxt").textContent="Pin location";toast("Location permission denied");},{enableHighAccuracy:true,timeout:10000});});
-  q("#cTagSearch").addEventListener("input",()=>renderTags());
-  q("#cTags").addEventListener("click",async e=>{const b=e.target.closest(".tag");if(!b)return;if(b.id==="cTagMore"){tagExpanded=true;renderTags();return;}if(b.id==="cAddTag"){const name=prompt("New tag name");if(name&&name.trim()){const nm=name.trim();await DB.put("tags",{name:nm});if(!d.tags.includes(nm))d.tags.push(nm);if(!cfTags.includes(nm))cfTags.push(nm);}renderTags();return;}const t=b.dataset.tag;if(d.tags.includes(t))d.tags=d.tags.filter(x=>x!==t);else d.tags.push(t);b.classList.toggle("on");});
+  q("#cTagsOpen").addEventListener("click",openTagPicker);
   q("#cFile").addEventListener("change",function(){ const files=[...this.files]; this.value=""; ingestProofs(files, renderProofs); });
   const cAmt=q("#cAmount");
   function fmtAmount(){ const raw=cAmt.value.replace(/,/g,"").trim(); if(raw==="")return; const n=parseFloat(raw); if(isNaN(n))return; cAmt.value=n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -1312,9 +1384,9 @@ async function openBatchesTab(){
         <div class="bd" style="margin-top:3px;">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)} · ${items.length} item${items.length!==1?"s":""}</div>
         <div style="margin-top:8px;font-family:var(--mono);font-weight:600;">${Object.keys(tot).map(c=>money(tot[c],c)).join("  ·  ")}</div>
         <div class="bstat"><span class="mini-tag ${cls}">${statusTag}</span>
-          ${pending?`<span class="mini-tag st-unclaimed-c">${pending} pending</span>`:""}
+          ${pending?`<span class="mini-tag st-submitted-c">${pending} pending</span>`:""}
           ${reimbursed?`<span class="mini-tag st-reimbursed-c">${reimbursed} paid</span>`:""}
-          ${rejected?`<span class="mini-tag st-unclaimed-c">${rejected} rejected</span>`:""}
+          ${rejected?`<span class="mini-tag st-rejected-c">${rejected} rejected</span>`:""}
         </div>
       </div>`;
     }).join("");
@@ -1330,7 +1402,7 @@ async function openBatchDetail(batchId){
 
   const rows=items.map(be=>{
     const oc=be.outcome;
-    const ocClass={pending:"st-unclaimed-c",reimbursed:"st-reimbursed-c",rejected:"st-submitted-c"}[oc];
+    const ocClass={pending:"st-submitted-c",reimbursed:"st-reimbursed-c",rejected:"st-rejected-c"}[oc];
     const ocLabel={pending:"Pending",reimbursed:"Reimbursed",rejected:"Rejected → unclaimed"}[oc];
     return `<div class="claim-row" data-be="${be.id}" data-entry="${be.entry_id}" style="cursor:pointer;">
       <div class="info">
@@ -1447,14 +1519,20 @@ function undoReimbursement(batchId,sc){
   });
 }
 
-function itemOutcomeSheet(beId,entryId,batchId){
+async function itemOutcomeSheet(beId,entryId,batchId){
+  const cur=(await DB.get("batch_entries",beId))?.outcome;
+  const opts=[
+    {o:"reimbursed",label:"Reimbursed"},
+    {o:"rejected",label:"Rejected — send back to Unclaimed"},
+    {o:"pending",label:"Reset to Pending"},
+  ];
   openSheet(`<h3>Update item</h3>
     <div class="list-choice">
-      <button data-o="reimbursed">Reimbursed <span class="check">✓</span></button>
-      <button data-o="rejected">Rejected — send back to Unclaimed</button>
-      <button data-o="pending">Reset to Pending</button>
+      ${opts.map(x=>x.o===cur
+        ? `<button class="lc-current" disabled>${x.label} <span class="lc-cur-tag">current</span></button>`
+        : `<button data-o="${x.o}">${x.label}</button>`).join("")}
     </div>`);
-  $$("#sheet .list-choice button").forEach(b=>b.addEventListener("click",async()=>{
+  $$("#sheet .list-choice button[data-o]").forEach(b=>b.addEventListener("click",async()=>{
     const o=b.dataset.o;
     const be=await DB.get("batch_entries",beId);
     be.outcome=o;be.outcome_updated_at=Date.now();await DB.put("batch_entries",be);
@@ -1628,7 +1706,7 @@ function openSettings(){
       <button id="sBackup">Export full backup <span class="check">↓</span></button>
       <button id="sImport">Restore from backup <span class="check">↑</span></button>
     </div>
-    <div class="hint" style="margin-top:10px;">Your data lives on this device only. A full backup packs <strong>everything — entries, companies, claims and receipt files</strong> — into one file. Save it to Google Drive now and then; if this phone is lost or the browser is cleared, Restore rebuilds the app from it.</div>
+    <div class="hint" style="margin-top:10px;"><strong>${state.lastBackupAt?`Last backup ${timeAgo(state.lastBackupAt)}.`:"You haven’t made a backup yet."}</strong> Your data lives on this device only. A full backup packs <strong>everything — entries, companies, claims and receipt files</strong> — into one file. Save it to your cloud (Drive, Dropbox, email to yourself); if this phone is lost or the browser is cleared, Restore rebuilds the app from it.</div>
 
     <div class="section-label">Try it out</div>
     <div class="list-choice">
@@ -1684,7 +1762,11 @@ async function exportBackup(){
     meta:await DB.getAll("meta"),
     proofs,
   };
-  downloadFile(`ledger_backup_${todayISO()}.json`, JSON.stringify(data), "application/json");
+  downloadFile(`claims_backup_${todayISO()}.json`, JSON.stringify(data), "application/json");
+  const now=Date.now();
+  await DB.put("meta",{k:"lastBackupAt",v:now});
+  state.lastBackupAt=now;
+  renderBackupBanner();
   toast(`Backup saved · ${proofs.length} receipt${proofs.length!==1?"s":""} included`);
 }
 
@@ -1731,6 +1813,9 @@ async function doRestore(data){
     if(recs.length) await DB.bulkPut("proofs",recs);
   }
   await loadAll();
+  const now=Date.now();
+  await DB.put("meta",{k:"lastBackupAt",v:now});
+  state.lastBackupAt=now;
   $$("#screens .screen").forEach(s=>closeScreen(s));
   renderHome();
   setTimeout(()=>toast("Backup restored"),350);
@@ -1822,10 +1907,12 @@ async function wipeAllData(){
 function setTab(tab){
   state.tab=tab;
   $$(".tabbar button").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
-  if(tab==="home"){/* already visible */}
-  else if(tab==="claim")openClaim();
-  else if(tab==="batches")openBatchesTab();
-  else if(tab==="settings")openSettings();
+  // pop any open screens back to the section root, then open the section
+  $$("#screens .screen").forEach(x=>closeScreen(x));
+  if(tab==="home"){ renderHome(); }
+  else if(tab==="claim") openClaim();
+  else if(tab==="batches") openBatchesTab();
+  else if(tab==="settings") openSettings();
 }
 
 function refreshCurrent(){
@@ -1836,6 +1923,7 @@ function refreshCurrent(){
    Wiring
    ============================================================ */
 $("#fab").addEventListener("click",()=>openAddEntry(null));
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) renderBackupBanner(); });
 async function duplicateEntry(e){
   const allTags=(await DB.getAll("tags")).map(t=>t.name);
   draft={id:uid(),company_id:e.company_id,type:e.type,amount_minor:null,amount_str:(e.amount_minor/100).toString(),currency:e.currency,vendor:e.vendor,payment_date:todayISO(),notes:e.notes,tags:[...(e.tags||[])],location_lat:e.location_lat,location_lng:e.location_lng,location_label:e.location_label,status:"unclaimed",_proofs:[],_isNew:true};
