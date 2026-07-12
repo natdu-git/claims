@@ -77,7 +77,12 @@
   }
   .row:active{background:#f6f8fa;}
   .row .accent{width:5px;flex:none;}
-  .row .body{flex:1;min-width:0;padding:13px 14px;display:flex;align-items:flex-start;gap:12px;}
+  .row .body{flex:1;min-width:0;padding:13px 14px;display:flex;align-items:flex-start;gap:12px;position:relative;}
+  .noproof-top{position:absolute;top:11px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--amber);font-weight:600;white-space:nowrap;}
+  .co-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0;flex:none;}
+  .swatches{display:flex;flex-wrap:wrap;gap:10px;}
+  .swatch{width:30px;height:30px;border-radius:50%;border:2px solid rgba(0,0,0,.12);}
+  .swatch.on{outline:2px solid var(--ink);outline-offset:2px;}
   .row .main{flex:1;min-width:0;}
   .row .vendor{font-weight:600;font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .row .meta{font-size:12.5px;color:var(--slate);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -221,20 +226,30 @@
   .print-actions{display:flex;gap:10px;position:sticky;top:0;background:#fff;padding-bottom:10px;}
   .psheet h2{font-size:19px;margin:6px 0 2px;}
   .psheet .pmeta{color:#666;font-size:12.5px;margin-bottom:14px;}
-  .pentry{border-top:1px solid #e2e2e2;padding:12px 0;}
-  .pentry .prow{display:flex;justify-content:space-between;gap:12px;font-size:15px;font-weight:600;}
-  .pentry .psub{color:#666;font-size:12px;margin:3px 0 8px;}
-  .pimg{display:block;max-width:100%;max-height:60vh;border:1px solid #ddd;border-radius:6px;margin:8px 0;}
-  .ppdf,.pnoproof{font-size:12px;color:#8a887f;font-style:italic;margin-top:6px;}
+  .pitem{display:flex;gap:14px;align-items:stretch;border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:14px;}
+  .pcard{flex:0 0 46%;max-width:46%;}
+  .pcard .pamt{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
+  .pcard .pcur{font-size:12px;color:#666;margin-top:1px;}
+  .pcard .pstatus{display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:999px;background:#f0ede6;color:#7a3b22;margin:6px 0 10px;}
+  .pkv{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .pkv td{padding:5px 0;border-top:1px solid #eee;vertical-align:top;}
+  .pkv tr:first-child td{border-top:none;}
+  .pkv td:first-child{color:#888;width:32%;}
+  .pkv td:last-child{font-weight:600;text-align:right;}
+  .pproof{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;}
+  .pproof img{width:100%;max-height:70vh;object-fit:contain;border:1px solid #ddd;border-radius:6px;}
+  .pproof-empty{flex:1;min-height:200px;border:1px dashed #ccc;border-radius:6px;}
+  .ppdf{font-size:12px;color:#8a887f;font-style:italic;}
   .ptotal{margin-top:16px;font-size:16px;font-weight:700;}
   @media print{
     body{visibility:hidden;}
     .print-host{position:absolute;top:0;left:0;padding:0;overflow:visible;}
     .print-host,.print-host *{visibility:visible;}
     .print-actions{display:none !important;}
-    .pentry{break-inside:avoid;page-break-inside:avoid;}
-    .pimg{max-height:none;}
+    .pitem{break-inside:avoid;page-break-inside:avoid;}
+    .pproof img{max-height:none;}
   }
+  @page{size:A4 portrait;margin:12mm;}
 
   /* summary card */
   .summary{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:16px;}
@@ -398,6 +413,10 @@
 const CURRENCIES = ["THB","RMB","USD"];
 const CUR_SYM = {THB:"฿", RMB:"¥", USD:"$"};
 const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"Reimbursed"};
+// Company dot colours — deliberately NOT the status colours (grey/amber/green/red), so a
+// company dot is never mistaken for a status. Blue / purple / teal / pink family.
+const COMPANY_PALETTE = ["#3f74c9","#7a5bd0","#1f9d8f","#cf5f93","#2b9fd6","#9a55b8","#556fb5","#c65f7a"];
+function companyColor(id){const c=state.companies.find(x=>x.id===id);return (c&&c.color)||"#b4b2a9";}
 
 /* ---------- tiny DOM helpers ---------- */
 const $ = (s,r=document)=>r.querySelector(s);
@@ -480,6 +499,8 @@ const state = {
 
 async function loadAll(){
   state.companies = (await DB.getAll("companies")).sort((a,b)=>a.name.localeCompare(b.name));
+  // Backfill a colour for any company created before colours existed (one-time, stable).
+  for(let i=0;i<state.companies.length;i++){ const c=state.companies[i]; if(!c.color){ c.color=COMPANY_PALETTE[i%COMPANY_PALETTE.length]; await DB.put("companies",c); } }
   state.entries = (await DB.getAll("entries"));
   const dc = await DB.get("meta","defaultCurrency");
   state.defaultCurrency = dc?.v || "THB";
@@ -586,15 +607,15 @@ async function renderLog(){
       <div class="body">
         <div class="main">
           <div class="vendor">${esc(e.vendor||e.location_label||companyName(e.company_id))}</div>
-          <div class="meta">${esc(companyName(e.company_id))}</div>
+          <div class="meta"><span class="co-dot" style="background:${companyColor(e.company_id)}"></span>${esc(companyName(e.company_id))}</div>
           ${e.tags&&e.tags.length?`<div class="row-tags">${[...e.tags].sort((a,b)=>a.localeCompare(b)).slice(0,4).map(esc).join(", ")}${e.tags.length>4?`, +${e.tags.length-4}`:""}</div>`:""}
         </div>
         <div class="amt">
           <span class="type-badge type-${e.type}">${e.type}</span>
           <div class="n">${e.type==='travel'&&e.amount_minor===0?'—':money(e.amount_minor,e.currency)}</div>
           <div class="cur">${e.type==='travel'&&e.amount_minor===0?`<span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`:`${e.currency} · <span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`}</div>
-          ${noProof&&!(e.type==='travel'&&e.amount_minor===0)?`<div class="flags"><span class="noproof">⚠ no proof</span></div>`:""}
         </div>
+        ${noProof&&!(e.type==='travel'&&e.amount_minor===0)?`<span class="noproof-top">⚠ no proof</span>`:""}
       </div>
     </div>`;
   }
@@ -1566,15 +1587,27 @@ async function exportClaimSheet(batchId){
     const proofs=await DB.getByIndex("proofs","entry_id",be.entry_id);
     const imgs=proofs.filter(p=>p.file_type&&p.file_type.startsWith("image"));
     const pdfs=proofs.filter(p=>p.file_type&&!p.file_type.startsWith("image"));
-    let media=imgs.map(p=>{const u=URL.createObjectURL(p.blob);urls.push(u);return `<img class="pimg" src="${u}">`;}).join("");
-    if(pdfs.length) media+=`<div class="ppdf">${pdfs.length} PDF proof${pdfs.length>1?"s":""} attached (not shown on this sheet)</div>`;
-    if(imgs.length===0 && pdfs.length===0) media=`<div class="pnoproof">No payment proof attached</div>`;
-    const extra=[];
-    if(live){ if(live.notes) extra.push("Notes: "+esc(live.notes)); if(live.tags&&live.tags.length) extra.push("Tags: "+esc(live.tags.join(", "))); }
-    entriesHTML+=`<div class="pentry">
-      <div class="prow"><span>${idx+1}. ${esc(be.vendor_snapshot)}</span><span>${money(be.amount_minor_snapshot,be.currency_snapshot)}</span></div>
-      <div class="psub">${fmtDate(be.date_snapshot)}${extra.length?" · "+extra.join(" · "):""}</div>
-      ${media}
+    let proofHTML=imgs.map(p=>{const u=URL.createObjectURL(p.blob);urls.push(u);return `<img src="${u}">`;}).join("");
+    if(pdfs.length) proofHTML+=`<div class="ppdf">${pdfs.length} PDF proof${pdfs.length>1?"s":""} attached (not shown)</div>`;
+    if(imgs.length===0 && pdfs.length===0) proofHTML=`<div class="pproof-empty"></div>`;
+    const type=live?live.type[0].toUpperCase()+live.type.slice(1):"";
+    const rows=[
+      ["Company",esc(companyName(batch.company_id))],
+      type?["Type",type]:null,
+      ["Vendor",esc(be.vendor_snapshot)],
+      ["Date",fmtDate(be.date_snapshot)],
+      (live&&live.tags&&live.tags.length)?["Tags",esc(live.tags.join(", "))]:null,
+      (live&&live.notes)?["Notes",esc(live.notes)]:null,
+    ].filter(Boolean).map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
+    const ocLabel={pending:"Pending",reimbursed:"Reimbursed",rejected:"Rejected"}[be.outcome]||"";
+    entriesHTML+=`<div class="pitem">
+      <div class="pcard">
+        <div class="pamt">${money(be.amount_minor_snapshot,be.currency_snapshot)}</div>
+        <div class="pcur">${be.currency_snapshot}</div>
+        ${ocLabel?`<div class="pstatus">${ocLabel}</div>`:""}
+        <table class="pkv">${rows}</table>
+      </div>
+      <div class="pproof">${proofHTML}</div>
     </div>`;
   }
   const totalHTML=Object.keys(tot).map(c=>money(tot[c],c)).join(" · ");
@@ -1660,7 +1693,7 @@ async function openCompanies(firstRun){
     if(banner)banner.style.display="none";
     if(startBtn)startBtn.style.display="";
     cl.innerHTML=state.companies.map(c=>`<div class="claim-row" data-id="${c.id}">
-      <div class="info"><div class="t">${esc(c.name)}</div><div class="s">Default currency: ${c.default_currency||state.defaultCurrency}</div></div>
+      <div class="info"><div class="t"><span class="co-dot" style="background:${c.color||'#b4b2a9'}"></span>${esc(c.name)}</div><div class="s">Default currency: ${c.default_currency||state.defaultCurrency}</div></div>
       <button class="tag" data-edit="${c.id}">Edit</button>
     </div>`).join("");
     cl.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>companyForm(()=>{refresh();},state.companies.find(x=>x.id===b.dataset.edit))));
@@ -1672,16 +1705,20 @@ async function openCompanies(firstRun){
 
 function companyForm(done,existing){
   const isEdit=!!existing;
+  let selColor = existing?.color || COMPANY_PALETTE[state.companies.length % COMPANY_PALETTE.length];
   openSheet(`<h3>${isEdit?"Edit":"New"} company</h3>
     <div class="field"><label>Name</label><input type="text" id="cName" placeholder="Company name" value="${esc(existing?.name||"")}"></div>
     <div class="field"><label>Default currency</label>
       <select id="cCur">${CURRENCIES.map(c=>`<option ${((existing?.default_currency)||state.defaultCurrency)===c?'selected':''}>${c}</option>`).join("")}</select></div>
+    <div class="field"><label>Colour</label>
+      <div class="swatches" id="cSwatches">${COMPANY_PALETTE.map(col=>`<button type="button" class="swatch${col===selColor?' on':''}" data-col="${col}" style="background:${col};" aria-label="colour"></button>`).join("")}</div></div>
     <button class="btn btn-primary" id="cSave">${isEdit?"Save":"Add company"}</button>
     ${isEdit?`<button class="btn btn-danger" id="cDel" style="margin-top:10px;">Delete company</button>`:""}`);
+  $$("#cSwatches .swatch").forEach(b=>b.addEventListener("click",()=>{ selColor=b.dataset.col; $$("#cSwatches .swatch").forEach(x=>x.classList.toggle("on",x===b)); }));
   $("#cSave").addEventListener("click",async()=>{
     const name=$("#cName").value.trim();if(!name){toast("Enter a name");return;}
-    const rec=existing?{...existing,name,default_currency:$("#cCur").value}
-      :{id:uid(),name,default_currency:$("#cCur").value,archived:false,created_at:Date.now()};
+    const rec=existing?{...existing,name,default_currency:$("#cCur").value,color:selColor}
+      :{id:uid(),name,default_currency:$("#cCur").value,color:selColor,archived:false,created_at:Date.now()};
     await DB.put("companies",rec);
     await loadAll();closeSheet();done&&done();refreshCurrent();
     toast("Company saved");
