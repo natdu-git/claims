@@ -224,8 +224,9 @@
   /* claim print sheet */
   .print-host{position:fixed;inset:0;background:#fff;color:#1f1e1d;z-index:10000;overflow:auto;padding:16px 18px;-webkit-overflow-scrolling:touch;}
   .print-actions{display:flex;gap:10px;position:sticky;top:0;background:#fff;padding-bottom:10px;}
-  .psheet h2{font-size:19px;margin:6px 0 2px;}
+  .psheet h2{font-size:19px;margin:6px 0 8px;}
   .psheet .pmeta{color:#666;font-size:12.5px;margin-bottom:14px;}
+  .psummary{max-width:380px;margin-bottom:18px;font-size:13px;}
   .pitem{display:flex;gap:14px;align-items:stretch;border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:14px;}
   .pcard{flex:0 0 46%;max-width:46%;}
   .pcard .pamt{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
@@ -417,6 +418,28 @@ const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"
 // company dot is never mistaken for a status. Blue / purple / teal / pink family.
 const COMPANY_PALETTE = ["#3f74c9","#7a5bd0","#1f9d8f","#cf5f93","#2b9fd6","#9a55b8","#556fb5","#c65f7a"];
 function companyColor(id){const c=state.companies.find(x=>x.id===id);return (c&&c.color)||"#b4b2a9";}
+// Short code used as the claim-ID prefix (e.g. "TOTEM"). Auto-derived from the name but editable.
+function codeFromName(name){ return ((name||"").toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6)) || "CO"; }
+// Human-readable claim ID: CODE-YEAR-NNN, with a persistent per-company-per-year counter in meta.
+async function nextClaimNo(companyId, year){
+  year = year || new Date().getFullYear();
+  const comp=state.companies.find(c=>c.id===companyId);
+  const code=(comp&&comp.code)||codeFromName(comp&&comp.name);
+  const key=`claimseq:${companyId}:${year}`;
+  const cur=(await DB.get("meta",key))?.v||0;
+  const next=cur+1;
+  await DB.put("meta",{k:key,v:next});
+  return `${code}-${year}-${String(next).padStart(3,"0")}`;
+}
+// One-time backfill: give existing batches a claim_no, oldest first, using each batch's own year.
+async function migrateClaimIds(){
+  const batches=(await DB.getAll("batches")).filter(b=>!b.claim_no).sort((a,b)=>(a.created_at||0)-(b.created_at||0));
+  for(const b of batches){
+    const year=new Date(b.created_at||Date.now()).getFullYear();
+    b.claim_no=await nextClaimNo(b.company_id, year);
+    await DB.put("batches",b);
+  }
+}
 
 /* ---------- tiny DOM helpers ---------- */
 const $ = (s,r=document)=>r.querySelector(s);
@@ -499,11 +522,16 @@ const state = {
 
 async function loadAll(){
   state.companies = (await DB.getAll("companies")).sort((a,b)=>a.name.localeCompare(b.name));
-  // Backfill a colour for any company created before colours existed (one-time, stable).
-  for(let i=0;i<state.companies.length;i++){ const c=state.companies[i]; if(!c.color){ c.color=COMPANY_PALETTE[i%COMPANY_PALETTE.length]; await DB.put("companies",c); } }
+  // Backfill a colour + short code for any company created before they existed (one-time, stable).
+  for(let i=0;i<state.companies.length;i++){ const c=state.companies[i]; let dirty=false;
+    if(!c.color){ c.color=COMPANY_PALETTE[i%COMPANY_PALETTE.length]; dirty=true; }
+    if(!c.code){ c.code=codeFromName(c.name); dirty=true; }
+    if(dirty) await DB.put("companies",c); }
   state.entries = (await DB.getAll("entries"));
   const dc = await DB.get("meta","defaultCurrency");
   state.defaultCurrency = dc?.v || "THB";
+  const cn = await DB.get("meta","claimantName");
+  state.claimantName = cn?.v || "";
   const lb = await DB.get("meta","lastBackupAt");
   state.lastBackupAt = lb?.v || 0;
   // Work out whether anything changed since the last backup (for the reminder banner).
@@ -982,8 +1010,10 @@ function confirmDelete(id,screen){
     const proofs=await DB.getByIndex("proofs","entry_id",id);
     for(const p of proofs) await DB.del("proofs",p.id);
     await DB.del("entries",id);
-    closeSheet();closeScreen(screen);
-    await loadAll();refreshCurrent();
+    await loadAll();
+    refreshCurrent();
+    closeSheet();
+    if(screen) closeScreen(screen);
     toast("Entry deleted");
   });
   $("#delNo").addEventListener("click",closeSheet);
@@ -1367,7 +1397,8 @@ async function generateBatch(list,screen){
   const now=Date.now();
   const batchId=uid();
   const batch={id:batchId, company_id:claimState.company, submitted_date:todayISO(),
-    range_start:claimState.from, range_end:claimState.to, note:"", created_at:now};
+    range_start:claimState.from, range_end:claimState.to, note:"", created_at:now,
+    claim_no: await nextClaimNo(claimState.company)};
   await DB.put("batches",batch);
   for(const e of selected){
     await DB.put("batch_entries",{id:uid(),batch_id:batchId,entry_id:e.id,
@@ -1410,6 +1441,7 @@ async function openBatchesTab(){
       else{statusTag="Closed";cls="st-unclaimed-c";}
       return `<div class="batch-card" data-id="${b.id}">
         <div class="bh"><span class="bt">${esc(companyName(b.company_id))}</span><span class="bd">${fmtDateShort(b.submitted_date)}</span></div>
+        <div class="bd mono" style="margin-top:2px;font-weight:600;color:var(--ink-soft);">${esc(b.claim_no||"")}</div>
         <div class="bd" style="margin-top:3px;">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)} · ${items.length} item${items.length!==1?"s":""}</div>
         <div style="margin-top:8px;font-family:var(--mono);font-weight:600;">${Object.keys(tot).map(c=>money(tot[c],c)).join("  ·  ")}</div>
         <div class="bstat"><span class="mini-tag ${cls}">${statusTag}</span>
@@ -1464,6 +1496,7 @@ async function openBatchDetail(batchId){
 
   const body=`
     <div class="kv">
+      <div class="r"><span class="k">Claim ID</span><span class="v mono">${esc(batch.claim_no||"—")}</span></div>
       <div class="r"><span class="k">Company</span><span class="v">${esc(companyName(batch.company_id))}</span></div>
       <div class="r"><span class="k">Submitted</span><span class="v">${fmtDate(batch.submitted_date)}</span></div>
       <div class="r"><span class="k">Date range</span><span class="v">${fmtDateShort(batch.range_start)} – ${fmtDateShort(batch.range_end)}</span></div>
@@ -1600,21 +1633,37 @@ async function itemOutcomeSheet(beId,entryId,batchId){
   }));
 }
 
+// Ask for the claimant's name and save it (used by Settings and required before a claim sheet).
+function promptClaimantName(onDone){
+  openSheet(`<h3>Your name</h3>
+    <p class="hint" style="margin-bottom:10px;">Appears on the claim sheet so accounting knows who to reimburse.</p>
+    <div class="field"><input type="text" id="nmInput" placeholder="Full name" value="${esc(state.claimantName||"")}"></div>
+    <button class="btn btn-primary" id="nmSave">Save</button>`);
+  document.querySelector("#nmSave").addEventListener("click",async()=>{
+    const v=document.querySelector("#nmInput").value.trim();
+    if(!v){ toast("Enter your name"); return; }
+    await DB.put("meta",{k:"claimantName",v}); state.claimantName=v;
+    closeSheet(); onDone&&onDone();
+  });
+}
+
 /* ============================================================
    Claim sheet (printable → Save as PDF), with proof photos embedded
    ============================================================ */
 async function exportClaimSheet(batchId){
   const batch=await DB.get("batches",batchId); if(!batch) return;
+  if(!state.claimantName){ promptClaimantName(()=>exportClaimSheet(batchId)); return; }  // name required on the sheet
   const items=await DB.getByIndex("batch_entries","batch_id",batchId);
   const tot={}; items.forEach(i=>tot[i.currency_snapshot]=(tot[i.currency_snapshot]||0)+i.amount_minor_snapshot);
   const urls=[];
-  let entriesHTML="";
+  let entriesHTML="", withProof=0;
   for(let idx=0; idx<items.length; idx++){
     const be=items[idx];
     const live=state.entries.find(x=>x.id===be.entry_id);
     const proofs=await DB.getByIndex("proofs","entry_id",be.entry_id);
     const imgs=proofs.filter(p=>p.file_type&&p.file_type.startsWith("image"));
     const pdfs=proofs.filter(p=>p.file_type&&!p.file_type.startsWith("image"));
+    if(imgs.length||pdfs.length) withProof++;
     let proofHTML=imgs.map(p=>{const u=URL.createObjectURL(p.blob);urls.push(u);return `<img src="${u}">`;}).join("");
     if(pdfs.length) proofHTML+=`<div class="ppdf">${pdfs.length} PDF proof${pdfs.length>1?"s":""} attached (not shown)</div>`;
     if(imgs.length===0 && pdfs.length===0) proofHTML=`<div class="pproof-empty"></div>`;
@@ -1647,8 +1696,17 @@ async function exportClaimSheet(batchId){
       <button class="btn btn-ghost btn-sm" id="pClose">Close</button>
     </div>
     <div class="psheet">
-      <h2>Claim — ${esc(companyName(batch.company_id))}</h2>
-      <div class="pmeta">Submitted ${fmtDate(batch.submitted_date)} · Range ${fmtDate(batch.range_start)} – ${fmtDate(batch.range_end)} · ${items.length} item${items.length>1?"s":""}</div>
+      <h2>Claim ${esc(batch.claim_no||"")}</h2>
+      <table class="pkv psummary">
+        <tr><td>Claim ID</td><td>${esc(batch.claim_no||"—")}</td></tr>
+        <tr><td>Claimant</td><td>${esc(state.claimantName||"—")}</td></tr>
+        <tr><td>Company</td><td>${esc(companyName(batch.company_id))}</td></tr>
+        <tr><td>Period</td><td>${fmtDate(batch.range_start)} – ${fmtDate(batch.range_end)}</td></tr>
+        <tr><td>Submitted</td><td>${fmtDate(batch.submitted_date)}</td></tr>
+        <tr><td>Items</td><td>${items.length}</td></tr>
+        <tr><td>Total</td><td>${totalHTML}</td></tr>
+        <tr><td>Receipts</td><td>${withProof} of ${items.length} have a receipt</td></tr>
+      </table>
       ${entriesHTML}
       <div class="ptotal">Total: ${totalHTML}</div>
     </div>`;
@@ -1680,7 +1738,8 @@ async function exportBatchCSV(batchId){
   lines.push("");
   Object.keys(tot).forEach(c=>lines.push(["","TOTAL "+c,(tot[c]/100).toFixed(2),c,""].join(",")));
   const cname=companyName(batch.company_id).replace(/[^a-z0-9]/gi,"_");
-  downloadFile(`claim_${cname}_${batch.submitted_date}.csv`, lines.join("\n"), "text/csv");
+  const fname=batch.claim_no ? batch.claim_no : `claim_${cname}_${batch.submitted_date}`;
+  downloadFile(`${fname}.csv`, lines.join("\n"), "text/csv");
   toast("CSV downloaded");
 }
 
@@ -1703,11 +1762,13 @@ async function exportFilteredCSV(){
 async function openCompanies(firstRun){
   const body=`
     <div class="warn" id="firstRunBanner" style="background:#e5f3f1;color:var(--jade-deep);${state.companies.length>0?'display:none;':''}">Add at least one company to start logging.</div>
+    ${firstRun?`<div class="field" style="margin-bottom:14px;"><label>Your name <span class="opt">(optional — appears on claim sheets)</span></label><input type="text" id="firstName" placeholder="Full name" value="${esc(state.claimantName||"")}"></div>`:""}
     <div id="companyList"></div>
     <button class="btn btn-ghost" id="addCompanyBtn" style="margin-top:12px;">+ Add company</button>
     <button class="btn btn-primary" id="startLoggingBtn" style="margin-top:14px;${state.companies.length>0?'':'display:none;'}">Start logging ›</button>
   `;
   const sc=openScreen("Companies", body);
+  async function saveFirstName(){ const el=sc.querySelector("#firstName"); if(el){ const v=el.value.trim(); if(v && v!==state.claimantName){ await DB.put("meta",{k:"claimantName",v}); state.claimantName=v; } } }
   function refresh(){
     const cl=sc.querySelector("#companyList");
     const banner=sc.querySelector("#firstRunBanner");
@@ -1727,8 +1788,8 @@ async function openCompanies(firstRun){
     cl.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>companyForm(()=>{refresh();},state.companies.find(x=>x.id===b.dataset.edit))));
   }
   refresh();
-  sc.querySelector("#addCompanyBtn").addEventListener("click",()=>companyForm(()=>refresh()));
-  sc.querySelector("#startLoggingBtn").addEventListener("click",()=>{closeScreen(sc);renderHome();});
+  sc.querySelector("#addCompanyBtn").addEventListener("click",async()=>{ await saveFirstName(); companyForm(()=>refresh()); });
+  sc.querySelector("#startLoggingBtn").addEventListener("click",async()=>{ await saveFirstName(); closeScreen(sc);renderHome(); });
 }
 
 function companyForm(done,existing){
@@ -1738,6 +1799,8 @@ function companyForm(done,existing){
     <div class="field"><label>Name</label><input type="text" id="cName" placeholder="Company name" value="${esc(existing?.name||"")}"></div>
     <div class="field"><label>Default currency</label>
       <select id="cCur">${CURRENCIES.map(c=>`<option ${((existing?.default_currency)||state.defaultCurrency)===c?'selected':''}>${c}</option>`).join("")}</select></div>
+    <div class="field"><label>Code <span class="opt">(prefix for claim IDs, e.g. TOTEM-2026-001)</span></label>
+      <input type="text" id="cCode" placeholder="auto from name" value="${esc(existing?.code||"")}" maxlength="6" style="text-transform:uppercase;"></div>
     <div class="field"><label>Colour</label>
       <div class="swatches" id="cSwatches">${COMPANY_PALETTE.map(col=>`<button type="button" class="swatch${col===selColor?' on':''}" data-col="${col}" style="background:${col};" aria-label="colour"></button>`).join("")}</div></div>
     <button class="btn btn-primary" id="cSave">${isEdit?"Save":"Add company"}</button>
@@ -1745,8 +1808,9 @@ function companyForm(done,existing){
   $$("#cSwatches .swatch").forEach(b=>b.addEventListener("click",()=>{ selColor=b.dataset.col; $$("#cSwatches .swatch").forEach(x=>x.classList.toggle("on",x===b)); }));
   $("#cSave").addEventListener("click",async()=>{
     const name=$("#cName").value.trim();if(!name){toast("Enter a name");return;}
-    const rec=existing?{...existing,name,default_currency:$("#cCur").value,color:selColor}
-      :{id:uid(),name,default_currency:$("#cCur").value,color:selColor,archived:false,created_at:Date.now()};
+    const code=($("#cCode").value.trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6))||codeFromName(name);
+    const rec=existing?{...existing,name,default_currency:$("#cCur").value,color:selColor,code}
+      :{id:uid(),name,default_currency:$("#cCur").value,color:selColor,code,archived:false,created_at:Date.now()};
     await DB.put("companies",rec);
     await loadAll();closeSheet();done&&done();refreshCurrent();
     toast("Company saved");
@@ -1765,6 +1829,7 @@ function openSettings(){
   const body=`
     <div class="section-label">Setup</div>
     <div class="list-choice">
+      <button id="sName">Your name <span style="color:var(--slate);font-weight:600">${state.claimantName?esc(state.claimantName):"Not set"} ›</span></button>
       <button id="sCompanies">Companies <span class="check">›</span></button>
       <button id="sCurrency">Default currency <span style="color:var(--slate);font-weight:600">${state.defaultCurrency} ›</span></button>
     </div>
@@ -1786,6 +1851,7 @@ function openSettings(){
     <div class="hint">Claims · a personal, offline expense tracker. ${state.entries.length} entries · ${state.companies.length} companies stored locally.</div>
   `;
   const sc=openScreen("More", body);
+  sc.querySelector("#sName").addEventListener("click",()=>promptClaimantName(()=>{ closeScreen(sc); openSettings(); }));
   sc.querySelector("#sCompanies").addEventListener("click",()=>openCompanies(false));
   sc.querySelector("#sCurrency").addEventListener("click",()=>{
     chooseSheet("Default currency",CURRENCIES.map(c=>({value:c,label:c})),state.defaultCurrency,async v=>{
@@ -2195,6 +2261,7 @@ async function requestPersistentStorage(){
     await DB.open();
     requestPersistentStorage();
     await loadAll();
+    await migrateClaimIds();
     await renderHome();
     if(state.companies.length===0){ setTimeout(()=>openCompanies(true),400); }
   }catch(err){
