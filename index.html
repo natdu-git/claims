@@ -68,35 +68,33 @@
 
   /* ---------- Log rows ---------- */
   .log{padding:8px 0 0;}
-  .day-head{padding:16px 18px 6px;font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink-soft);}
-  .row{
-    display:flex;align-items:stretch;gap:0;
-    background:var(--surface);
-    margin:0 12px 8px;border-radius:var(--r);
-    overflow:hidden;border:1px solid var(--line-soft);
-  }
+  .day-head{padding:16px 18px 6px;font-size:13px;font-weight:600;color:var(--ink-soft);}
+  .day-group{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r);overflow:hidden;margin:0 12px;}
+  .row{display:flex;align-items:stretch;position:relative;}
   .row:active{background:#f6f8fa;}
   .row .accent{width:5px;flex:none;}
-  .row .body{flex:1;min-width:0;padding:13px 14px;display:flex;align-items:flex-start;gap:12px;position:relative;}
-  .noproof-top{position:absolute;top:11px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--amber);font-weight:600;white-space:nowrap;}
-  .co-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0;flex:none;}
+  .row-div{height:1px;background:var(--line-soft);margin-left:18px;}
+  .row .body{flex:1;min-width:0;padding:11px 13px;}
+  .noproof-top{position:absolute;top:9px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--amber);font-weight:600;white-space:nowrap;z-index:1;}
+  .rline1{display:flex;justify-content:space-between;align-items:baseline;gap:12px;}
+  .rline1 .vendor{font-weight:600;font-size:15px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .rline1 .amt-main{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:15.5px;color:var(--ink);white-space:nowrap;flex:none;letter-spacing:-.02em;}
+  .amt-conv{color:var(--slate);font-weight:500;}
+  .amt-need{color:var(--amber);font-weight:500;}
+  .rline2{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:4px;}
+  .rline2 .meta{font-size:12.5px;color:var(--slate);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rline2 .cur{font-size:10.5px;font-weight:600;letter-spacing:.04em;color:var(--slate);white-space:nowrap;flex:none;}
+  .row .type-badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:4px;margin-right:6px;vertical-align:1px;}
+  .type-travel{background:#e5f3f1;color:var(--jade-deep);}
+  .type-expense{background:#eef0f2;color:var(--ink-soft);}
+  .co-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:0;}
+  .row-tags{font-size:11px;color:var(--slate);margin-top:3px;line-height:1.3;}
+  .st-word-unclaimed{color:var(--slate);}
+  .st-word-submitted{color:var(--amber);}
+  .st-word-reimbursed{color:var(--green);}
   .swatches{display:flex;flex-wrap:wrap;gap:10px;}
   .swatch{width:30px;height:30px;border-radius:50%;border:2px solid rgba(0,0,0,.12);}
   .swatch.on{outline:2px solid var(--ink);outline-offset:2px;}
-  .row .main{flex:1;min-width:0;}
-  .row .vendor{font-weight:600;font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .row .meta{font-size:12.5px;color:var(--slate);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .row .type-badge{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:4px;margin-bottom:4px;}
-  .type-travel{background:#e5f3f1;color:var(--jade-deep);}
-  .type-expense{background:#eef0f2;color:var(--ink-soft);}
-  .row .amt{text-align:right;flex:none;}
-  .row .amt .n{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:16px;letter-spacing:-.02em;}
-  .row .amt .cur{font-size:10.5px;color:var(--slate);font-weight:600;letter-spacing:.05em;margin-top:2px;}
-  .row .amt .st-word-unclaimed{color:var(--slate);}
-  .row .amt .st-word-submitted{color:var(--amber);}
-  .row .amt .st-word-reimbursed{color:var(--green);}
-  .row .flags{margin-top:4px;font-size:11px;}
-  .noproof{color:var(--amber);font-weight:600;}
 
   /* status accents */
   .st-unclaimed{background:var(--slate);}
@@ -418,6 +416,9 @@ const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"
 // company dot is never mistaken for a status. Blue / purple / teal / pink family.
 const COMPANY_PALETTE = ["#3f74c9","#7a5bd0","#1f9d8f","#cf5f93","#2b9fd6","#9a55b8","#556fb5","#c65f7a"];
 function companyColor(id){const c=state.companies.find(x=>x.id===id);return (c&&c.color)||"#b4b2a9";}
+// THB claim value of an entry. THB entries use their own amount; foreign entries use the
+// manually-entered claim_thb_minor (null until filled from the card statement).
+function claimThb(e){ return e.currency==="THB" ? e.amount_minor : (e.claim_thb_minor!=null ? e.claim_thb_minor : null); }
 // Short code used as the claim-ID prefix (e.g. "TOTEM"). Auto-derived from the name but editable.
 function codeFromName(name){ return ((name||"").toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6)) || "CO"; }
 // Human-readable claim ID: CODE-YEAR-NNN, with a persistent per-company-per-year counter in meta.
@@ -551,9 +552,14 @@ async function proofCount(entryId){const p=await DB.getByIndex("proofs","entry_i
    HOME / LOG
    ============================================================ */
 async function renderHome(){
-  // outstanding = submitted entries, grouped by currency
+  // outstanding = submitted entries. THB claim values roll into one THB figure; foreign items
+  // that don't have a THB amount yet show separately in their own currency.
   const owed={};
-  state.entries.filter(e=>e.status==="submitted").forEach(e=>{owed[e.currency]=(owed[e.currency]||0)+e.amount_minor;});
+  state.entries.filter(e=>e.status==="submitted").forEach(e=>{
+    const thb=claimThb(e);
+    if(thb!=null){ owed["THB"]=(owed["THB"]||0)+thb; }
+    else { owed[e.currency]=(owed[e.currency]||0)+e.amount_minor; }
+  });
   const figs=$("#owedFigs"), sub=$("#owedSub");
   const keys=Object.keys(owed);
   if(keys.length===0){
@@ -615,6 +621,37 @@ function filteredEntries(){
   return list;
 }
 
+// Amount shown on a Log row. Foreign entries show native → THB claim (or → ⚠ ฿??? if not set yet).
+function amountMainHTML(e){
+  if(e.type==='travel' && e.amount_minor===0) return '—';
+  const native = money(e.amount_minor, e.currency);
+  if(e.currency==="THB") return native;
+  if(e.claim_thb_minor!=null) return `${native} <span class="amt-conv">→ ${money(e.claim_thb_minor,"THB")}</span>`;
+  return `${native} <span class="amt-need">→ ⚠ ฿???</span>`;
+}
+function logRowHTML(e, noProof){
+  const showNoProof = noProof && !(e.type==='travel' && e.amount_minor===0);
+  const curLine = (e.type==='travel'&&e.amount_minor===0)
+    ? `<span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`
+    : `${e.currency} · <span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`;
+  const tags = (e.tags&&e.tags.length)
+    ? `<div class="row-tags">${[...e.tags].sort((a,b)=>a.localeCompare(b)).slice(0,4).map(esc).join(", ")}${e.tags.length>4?`, +${e.tags.length-4}`:""}</div>` : "";
+  return `<div class="row" data-id="${e.id}">
+      <div class="accent st-${e.status}"></div>
+      ${showNoProof?`<span class="noproof-top">⚠ no proof</span>`:""}
+      <div class="body">
+        <div class="rline1">
+          <div class="vendor">${esc(e.vendor||e.location_label||companyName(e.company_id))}</div>
+          <div class="amt-main">${amountMainHTML(e)}</div>
+        </div>
+        <div class="rline2">
+          <div class="meta"><span class="type-badge type-${e.type}">${e.type}</span><span class="co-dot" style="background:${companyColor(e.company_id)}"></span>${esc(companyName(e.company_id))}</div>
+          <div class="cur">${curLine}</div>
+        </div>
+        ${tags}
+      </div>
+    </div>`;
+}
 async function renderLog(){
   const list=filteredEntries();
   const log=$("#log");
@@ -623,30 +660,21 @@ async function renderLog(){
     log.innerHTML=`<div class="empty"><h3>${anyEntries?"No matches":"No entries yet"}</h3><p>${anyEntries?"Try clearing a filter.":"Tap + to log your first expense."}</p></div>`;
     return;
   }
-  // proof counts (batch)
   const allProofs=await DB.getAll("proofs");
   const pc={};allProofs.forEach(p=>pc[p.entry_id]=(pc[p.entry_id]||0)+1);
-  let html="", lastDay="";
+  let html="", lastDay=null, open=false, firstInGroup=false;
   for(const e of list){
-    if(e.payment_date!==lastDay){lastDay=e.payment_date;html+=`<div class="day-head">${fmtDate(e.payment_date)}</div>`;}
-    const noProof = !pc[e.id];
-    html+=`<div class="row" data-id="${e.id}">
-      <div class="accent st-${e.status}"></div>
-      <div class="body">
-        <div class="main">
-          <div class="vendor">${esc(e.vendor||e.location_label||companyName(e.company_id))}</div>
-          <div class="meta"><span class="co-dot" style="background:${companyColor(e.company_id)}"></span>${esc(companyName(e.company_id))}</div>
-          ${e.tags&&e.tags.length?`<div class="row-tags">${[...e.tags].sort((a,b)=>a.localeCompare(b)).slice(0,4).map(esc).join(", ")}${e.tags.length>4?`, +${e.tags.length-4}`:""}</div>`:""}
-        </div>
-        <div class="amt">
-          <span class="type-badge type-${e.type}">${e.type}</span>
-          <div class="n">${e.type==='travel'&&e.amount_minor===0?'—':money(e.amount_minor,e.currency)}</div>
-          <div class="cur">${e.type==='travel'&&e.amount_minor===0?`<span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`:`${e.currency} · <span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`}</div>
-        </div>
-        ${noProof&&!(e.type==='travel'&&e.amount_minor===0)?`<span class="noproof-top">⚠ no proof</span>`:""}
-      </div>
-    </div>`;
+    if(e.payment_date!==lastDay){
+      if(open) html+=`</div>`;                 // close previous day-group
+      lastDay=e.payment_date;
+      html+=`<div class="day-head">${fmtDate(e.payment_date)}</div><div class="day-group">`;
+      open=true; firstInGroup=true;
+    }
+    if(!firstInGroup) html+=`<div class="row-div"></div>`;  // inset divider between same-day rows
+    firstInGroup=false;
+    html+=logRowHTML(e, !pc[e.id]);
   }
+  if(open) html+=`</div>`;
   log.innerHTML=html;
 }
 
@@ -700,6 +728,7 @@ function lastUsedCompanyId(){
 function newDraft(){
   return {id:uid(), company_id:lastUsedCompanyId(), type:"expense",
     amount_minor:null, amount_str:"", currency:state.defaultCurrency, vendor:"",
+    claim_thb_minor:null, claim_thb_str:"",
     payment_date:todayISO(), notes:"", tags:[],
     location_lat:null, location_lng:null, location_label:"",
     status:"unclaimed", _proofs:[], _isNew:true};
@@ -714,7 +743,7 @@ async function openAddEntry(existing){
     return;
   }
   if(existing){
-    draft={...existing, amount_str:(existing.amount_minor/100).toString(), tags:[...(existing.tags||[])], _proofs:[], _isNew:false};
+    draft={...existing, amount_str:(existing.amount_minor/100).toString(), claim_thb_str:(existing.claim_thb_minor!=null?(existing.claim_thb_minor/100).toString():""), tags:[...(existing.tags||[])], _proofs:[], _isNew:false};
     const proofs=await DB.getByIndex("proofs","entry_id",existing.id);
     draft._proofs=proofs.map(p=>({id:p.id, file_type:p.file_type, name:p.name, blob:p.blob, _existing:true}));
   }else{
@@ -960,13 +989,16 @@ async function saveEntry(isEdit){
   if(isEdit){
     const before=state.entries.find(e=>e.id===d.id);
     changes={};
-    const fields=["amount_minor","currency","vendor","payment_date","notes","company_id","type","location_label"];
+    const fields=["amount_minor","currency","claim_thb_minor","vendor","payment_date","notes","company_id","type","location_label"];
     fields.forEach(f=>{ if((before[f]??"")!==(d[f]??"")) changes[f]=[before[f],d[f]]; });
     if(JSON.stringify((before.tags||[]).sort())!==JSON.stringify([...d.tags].sort())) changes.tags=[before.tags||[],d.tags];
   }
+  const claimRaw = (d.claim_thb_str||"").replace(/,/g,"").trim();
+  const claim_thb_minor = (d.currency!=="THB" && claimRaw!=="" && !isNaN(parseFloat(claimRaw)))
+    ? Math.round(parseFloat(claimRaw)*100) : null;
   const rec={
     id:d.id, company_id:d.company_id, type:d.type,
-    amount_minor:d.amount_minor, currency:d.currency,
+    amount_minor:d.amount_minor, currency:d.currency, claim_thb_minor,
     vendor:d.vendor, payment_date:d.payment_date, notes:d.notes, tags:d.tags,
     location_lat:d.location_lat, location_lng:d.location_lng, location_label:d.location_label,
     status:d.status||"unclaimed",
@@ -1078,6 +1110,11 @@ function renderEntryFormCompact(allTags, isEdit){
       </div></div>
     </div>
 
+    <div class="lrow ${d.currency==="THB"?"hidden":""}" id="cClaimThbCell">
+      <label>Claim in THB <span class="opt">(optional)</span></label>
+      <div class="lctl"><input type="text" inputmode="decimal" id="cClaimThb" placeholder="฿ amount to claim" value="${esc(d.claim_thb_str||"")}"></div>
+    </div>
+
     <div class="lrow tall ${isTravel?"hidden":""}" id="cNotesCell">
       <label>Notes <span class="opt">(optional)</span></label>
       <div class="lctl"><textarea id="cNotes" placeholder="Optional" rows="1" style="min-height:40px;height:40px;">${esc(d.notes)}</textarea></div>
@@ -1172,7 +1209,9 @@ function wireCompactForm(screen,isEdit){
     $$(".proof-thumb .del",pl).forEach(x=>x.addEventListener("click",()=>{d._proofs.splice(+x.dataset.i,1);renderProofs();}));
     $$(".proof-thumb img",pl).forEach(im=>{ im.style.cursor="pointer"; im.addEventListener("click",()=>viewImage(im.src)); });
   }
-  q("#cCompany").addEventListener("change",e=>{d.company_id=e.target.value;const c=state.companies.find(x=>x.id===d.company_id);if(c&&c.default_currency){d.currency=c.default_currency;q("#cCur").value=c.default_currency;}});
+  function syncClaimThb(){ const cell=q("#cClaimThbCell"); if(cell) cell.classList.toggle("hidden", q("#cCur").value==="THB"); }
+  q("#cCompany").addEventListener("change",e=>{d.company_id=e.target.value;const c=state.companies.find(x=>x.id===d.company_id);if(c&&c.default_currency){d.currency=c.default_currency;q("#cCur").value=c.default_currency;syncClaimThb();}});
+  q("#cCur").addEventListener("change",()=>{ d.currency=q("#cCur").value; syncClaimThb(); });
   q("#cType").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;d.type=b.dataset.t;$$("#cType button",screen).forEach(x=>x.classList.toggle("on",x===b));applyType();});
   q("#cPin").addEventListener("click",()=>{if(!navigator.geolocation){toast("Geolocation not available");return;}q("#cPinTxt").textContent="Locating\u2026";navigator.geolocation.getCurrentPosition(pos=>{d.location_lat=pos.coords.latitude;d.location_lng=pos.coords.longitude;q("#cPinTxt").textContent="Pinned";toast("Location pinned");},()=>{q("#cPinTxt").textContent="Pin location";toast("Location permission denied");},{enableHighAccuracy:true,timeout:10000});});
   q("#cTagsOpen").addEventListener("click",openTagPicker);
@@ -1182,11 +1221,15 @@ function wireCompactForm(screen,isEdit){
   cAmt.addEventListener("focus",()=>{ cAmt.value=cAmt.value.replace(/,/g,""); });
   cAmt.addEventListener("blur",fmtAmount);
   fmtAmount();
+  const cClaim=q("#cClaimThb");
+  function fmtClaim(){ if(!cClaim)return; const raw=cClaim.value.replace(/,/g,"").trim(); if(raw==="")return; const n=parseFloat(raw); if(isNaN(n))return; cClaim.value=n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  if(cClaim){ cClaim.addEventListener("focus",()=>{ cClaim.value=cClaim.value.replace(/,/g,""); }); cClaim.addEventListener("blur",fmtClaim); fmtClaim(); }
   const cDateEl=q("#cDate");
   cDateEl.addEventListener("change",()=>{ d.payment_date=cDateEl.value; q("#cDateText").textContent=fmtDateText(cDateEl.value); });
   q("#cSave").addEventListener("click",async()=>{
     d.amount_str=q("#cAmount").value.trim();
     d.currency=q("#cCur").value;
+    d.claim_thb_str=q("#cClaimThb")?q("#cClaimThb").value.trim():"";
     d.vendor=q("#cVendor")?q("#cVendor").value.trim():"";
     d.payment_date=q("#cDate").value;
     d.notes=q("#cNotes")?q("#cNotes").value.trim():"";
@@ -1337,19 +1380,25 @@ async function renderClaim(){
         <div class="t">${esc(e.vendor||companyName(e.company_id))} ${noProof?'<span class="noproof">⚠</span>':''}</div>
         <div class="s">${fmtDateShort(e.payment_date)} · ${STATUS_LABEL[e.status]}${e.status!=="unclaimed"?" (already)":""}</div>
       </div>
-      <div class="a">${money(e.amount_minor,e.currency)}</div>
+      <div class="a">${amountMainHTML(e)}</div>
     </div>`;
   }).join("");
 
-  // totals per currency for selected
-  const tot={};let noProofCount=0;
-  list.forEach(e=>{if(claimState.selected.has(e.id)){tot[e.currency]=(tot[e.currency]||0)+e.amount_minor;if(!pc[e.id])noProofCount++;}});
+  // totals for selected — THB claim values roll into THB; foreign items without a THB amount
+  // are flagged and shown in native currency.
+  const tot={};let noProofCount=0, needThbCount=0;
+  list.forEach(e=>{if(claimState.selected.has(e.id)){
+    const thb=claimThb(e);
+    if(thb!=null){ tot["THB"]=(tot["THB"]||0)+thb; }
+    else { needThbCount++; tot[e.currency]=(tot[e.currency]||0)+e.amount_minor; }
+    if(!pc[e.id])noProofCount++;
+  }});
   const totKeys=Object.keys(tot);
   const selCount=claimState.selected.size;
 
   const body=`
     <div class="field"><label>Company</label>
-      <button class="pill on" id="claimCompany" style="width:100%;text-align:left;">${esc(companyName(claimState.company))} ▾</button></div>
+      <button id="claimCompany" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:var(--surface);color:var(--ink);font-size:16px;display:flex;justify-content:space-between;align-items:center;">${esc(companyName(claimState.company))} <span style="color:var(--slate);">▾</span></button></div>
     <div style="display:flex;gap:10px;">
       <div class="field" style="flex:1;"><label>From</label><input type="date" id="claimFrom" value="${claimState.from}"></div>
       <div class="field" style="flex:1;"><label>To</label><input type="date" id="claimTo" value="${claimState.to}"></div>
@@ -1368,6 +1417,7 @@ async function renderClaim(){
     const bar=document.createElement("div");
     bar.className="totbar";
     bar.innerHTML=`
+      ${needThbCount>0?`<div class="warn">⚠ ${needThbCount} foreign item${needThbCount>1?"s":""} need a THB claim amount before this can be generated</div>`:""}
       ${noProofCount>0?`<div class="warn">⚠ ${noProofCount} of ${selCount} selected ${selCount===1?"entry has":"entries have"} no proof</div>`:""}
       <div class="tot-figs">${totKeys.length?totKeys.map(c=>`<span class="tf">${money(tot[c],c)}</span>`).join(""):'<span class="tf" style="color:var(--slate)">Nothing selected</span>'}</div>
       <button class="btn btn-primary" id="genBtn" ${selCount===0?"disabled":""}>Generate claim · ${selCount} item${selCount!==1?"s":""}</button>`;
@@ -1394,6 +1444,9 @@ async function renderClaim(){
 async function generateBatch(list,screen){
   const selected=list.filter(e=>claimState.selected.has(e.id));
   if(selected.length===0)return;
+  // Claims are in THB — every foreign item needs a THB claim amount before it can go in.
+  const needThb=selected.filter(e=>claimThb(e)===null);
+  if(needThb.length){ toast(`${needThb.length} foreign item${needThb.length>1?"s":""} still need a THB claim amount`); return; }
   const now=Date.now();
   const batchId=uid();
   const batch={id:batchId, company_id:claimState.company, submitted_date:todayISO(),
@@ -1401,8 +1454,11 @@ async function generateBatch(list,screen){
     claim_no: await nextClaimNo(claimState.company)};
   await DB.put("batches",batch);
   for(const e of selected){
+    const thb=claimThb(e);   // THB claim value; foreign items are converted, original kept for reference
     await DB.put("batch_entries",{id:uid(),batch_id:batchId,entry_id:e.id,
-      amount_minor_snapshot:e.amount_minor,currency_snapshot:e.currency,
+      amount_minor_snapshot: thb!=null?thb:e.amount_minor,
+      currency_snapshot: thb!=null?"THB":e.currency,
+      original_amount_minor:e.amount_minor, original_currency:e.currency,
       vendor_snapshot:e.vendor||companyName(e.company_id), date_snapshot:e.payment_date,
       outcome:"pending",outcome_updated_at:null});
     e.status="submitted"; await DB.put("entries",e);
@@ -1673,6 +1729,7 @@ async function exportClaimSheet(batchId){
       type?["Type",type]:null,
       ["Vendor",esc(be.vendor_snapshot)],
       ["Date",fmtDate(be.date_snapshot)],
+      (be.original_currency && be.original_currency!==be.currency_snapshot)?["Original",money(be.original_amount_minor,be.original_currency)]:null,
       (live&&live.tags&&live.tags.length)?["Tags",esc(live.tags.join(", "))]:null,
       (live&&live.notes)?["Notes",esc(live.notes)]:null,
     ].filter(Boolean).map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
