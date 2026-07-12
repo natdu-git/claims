@@ -145,6 +145,16 @@
   }
   input:focus,textarea:focus,select:focus{border-color:var(--jade);box-shadow:0 0 0 3px rgba(15,118,110,.12);}
   textarea{resize:vertical;min-height:56px;}
+  .lrow{display:flex;align-items:center;gap:12px;}
+  .lrow > label{width:33%;flex:none;font-size:13px;font-weight:500;color:var(--ink-soft);margin:0;}
+  .lrow.tall{align-items:flex-start;}
+  .lrow.tall > label{padding-top:9px;}
+  .lrow > .lctl{flex:1;min-width:0;display:flex;justify-content:flex-end;}
+  .lctl > *{width:100%;}
+  .lctl > .switch{width:auto;}
+  .lrow .lctl input[type=text]{text-align:right;}
+  .lctl .tag-search{text-align:left;}
+  .lbreak{border-top:1px solid var(--line);}
   .date-wrap{position:relative;}
   .date-text{display:block;width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:16px;color:var(--ink);}
   .date-overlay{position:absolute;inset:0;width:100%;height:100%;opacity:0;}
@@ -913,68 +923,74 @@ function renderEntryFormCompact(allTags, isEdit){
   const isTravel=d.type==="travel";
   const body=`
   <div class="cform">
-    <div class="frow">
-      <div class="field nomb">
-        <label>Type</label>
+    <div class="lrow">
+      <label>Type</label>
+      <div class="lctl">
         <div class="switch" id="cType">
           <button type="button" data-t="expense" class="${isTravel?"":"on"}">Expense</button>
           <button type="button" data-t="travel" class="${isTravel?"on":""}">Travel</button>
         </div>
       </div>
-      <div class="field nomb">
-        <label>Date <span class="req">*</span></label>
-        <div class="date-wrap">
-          <span class="date-text" id="cDateText">${fmtDateText(d.payment_date)}</span>
-          <input type="date" id="cDate" value="${esc(d.payment_date)}" max="${todayISO()}" class="date-overlay">
-        </div>
-      </div>
     </div>
 
-    <div class="field nomb">
+    <div class="lrow">
       <label>Company <span class="req">*</span></label>
-      <select id="cCompany">${state.companies.map(c=>`<option value="${c.id}" ${c.id===d.company_id?"selected":""}>${esc(c.name)}</option>`).join("")}</select>
+      <div class="lctl"><select id="cCompany">${state.companies.map(c=>`<option value="${c.id}" ${c.id===d.company_id?"selected":""}>${esc(c.name)}</option>`).join("")}</select></div>
     </div>
 
-    <div class="frow">
-      <div class="field nomb ${isTravel?"hidden":""}" id="cVendorCell">
-        <label>Vendor <span class="opt">(optional)</span></label>
-        <input type="text" id="cVendor" placeholder="Who you paid" value="${esc(d.vendor)}">
-      </div>
-      <div class="field nomb">
-        <label id="cAmtLabel">${isTravel?'Toll <span class="opt">(opt)</span>':'Amount <span class="req">*</span>'}</label>
-        <div class="amount-row">
-          <input type="text" inputmode="decimal" id="cAmount" placeholder="0.00" value="${esc(d.amount_str||"")}">
-          <select id="cCur">${CURRENCIES.map(c=>`<option ${c===d.currency?"selected":""}>${c}</option>`).join("")}</select>
-        </div>
-      </div>
+    <div class="lrow">
+      <label>Date <span class="req">*</span></label>
+      <div class="lctl"><div class="date-wrap">
+        <span class="date-text" id="cDateText">${fmtDateText(d.payment_date)}</span>
+        <input type="date" id="cDate" value="${esc(d.payment_date)}" max="${todayISO()}" class="date-overlay">
+      </div></div>
     </div>
 
-    <div class="field nomb ${isTravel?"":"hidden"}" id="cLocCell">
-      <label>Location <span class="opt">(pin required)</span></label>
-      <div class="loc-inline">
-        <button class="btn btn-ghost btn-sm" id="cPin" style="flex:1;">&#128205; <span id="cPinTxt">${d.location_lat!=null?"Pinned":"Pin location"}</span></button>
-        <input type="text" id="cLocLabel" placeholder="Label (optional)" value="${esc(d.location_label)}" style="flex:1;">
-      </div>
+    <div class="lbreak"></div>
+
+    <div class="lrow ${isTravel?"hidden":""}" id="cVendorCell">
+      <label>Vendor <span class="opt">(optional)</span></label>
+      <div class="lctl"><input type="text" id="cVendor" placeholder="Who you paid" value="${esc(d.vendor)}"></div>
     </div>
 
-    <div class="field nomb ${isTravel?"hidden":""}" id="cNotesCell">
+    <div class="lrow tall ${isTravel?"":"hidden"}" id="cLocCell">
+      <label>Location <span class="opt">(pin)</span></label>
+      <div class="lctl"><div class="loc-inline">
+        <button class="btn btn-ghost btn-sm" id="cPin" style="flex:1;">&#128205; <span id="cPinTxt">${d.location_lat!=null?"Pinned":"Pin"}</span></button>
+        <input type="text" id="cLocLabel" placeholder="Label" value="${esc(d.location_label)}" style="flex:1;">
+      </div></div>
+    </div>
+
+    <div class="lrow">
+      <label id="cAmtLabel">${isTravel?'Toll <span class="opt">(opt)</span>':'Amount <span class="req">*</span>'}</label>
+      <div class="lctl"><div class="amount-row">
+        <input type="text" inputmode="decimal" id="cAmount" placeholder="0.00" value="${esc(d.amount_str||"")}">
+        <select id="cCur">${CURRENCIES.map(c=>`<option ${c===d.currency?"selected":""}>${c}</option>`).join("")}</select>
+      </div></div>
+    </div>
+
+    <div class="lrow tall ${isTravel?"hidden":""}" id="cNotesCell">
       <label>Notes <span class="opt">(optional)</span></label>
-      <textarea id="cNotes" placeholder="Optional" rows="1" style="min-height:40px;height:40px;">${esc(d.notes)}</textarea>
+      <div class="lctl"><textarea id="cNotes" placeholder="Optional" rows="1" style="min-height:40px;height:40px;">${esc(d.notes)}</textarea></div>
     </div>
 
-    <div class="field nomb">
+    <div class="lrow tall">
       <label>Payment proof <span class="opt">(optional)</span></label>
-      <div class="proofs" id="cProofs"></div>
-      <input type="file" id="cFile" accept="image/*,application/pdf" multiple capture="environment" class="hidden">
+      <div class="lctl"><div>
+        <div class="proofs" id="cProofs"></div>
+        <input type="file" id="cFile" accept="image/*,application/pdf" multiple capture="environment" class="hidden">
+      </div></div>
     </div>
 
-    <div class="field nomb ${isTravel?"hidden":""}" id="cTagsCell">
+    <div class="lrow tall ${isTravel?"hidden":""}" id="cTagsCell">
       <label>Tags <span class="opt">(optional)</span></label>
-      <input type="text" id="cTagSearch" class="tag-search" placeholder="Search tags…" autocomplete="off">
-      <div class="picker-list" id="cTags"></div>
+      <div class="lctl"><div>
+        <input type="text" id="cTagSearch" class="tag-search" placeholder="Search tags…" autocomplete="off">
+        <div class="picker-list" id="cTags"></div>
+      </div></div>
     </div>
 
-    <button class="btn btn-primary" id="cSave" style="margin-top:2px;">${isEdit?"Save changes":"Save entry"}</button>
+    <button class="btn btn-primary" id="cSave" style="margin-top:6px;">${isEdit?"Save changes":"Save entry"}</button>
     ${isEdit?`<button class="btn btn-danger" id="cDelete" style="margin-top:8px;">Delete entry</button>`:""}
   </div>`;
   const screen=openScreen(isEdit?"Edit entry":"New entry", body);
