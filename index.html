@@ -383,11 +383,11 @@
   </button>
   <button data-tab="claim">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4M7 3h10a2 2 0 012 2v14l-7-3-7 3V5a2 2 0 012-2z"/></svg>
-    Claim
+    Submit Claim
   </button>
   <button data-tab="batches">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
-    Batches
+    Claim Batches
   </button>
   <button data-tab="settings">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
@@ -1070,7 +1070,7 @@ function renderEntryFormCompact(allTags, isEdit){
     </div>
 
     <button class="btn btn-primary" id="cSave" style="margin-top:6px;">${isEdit?"Save changes":"Save entry"}</button>
-    ${isEdit?`<button class="btn btn-danger" id="cDelete" style="margin-top:8px;">Delete entry</button>`:""}
+    ${isEdit && d.status==="unclaimed"?`<button class="btn btn-danger" id="cDelete" style="margin-top:8px;">Delete entry</button>`:""}
   </div>`;
   const screen=openScreen(isEdit?"Edit entry":"New entry", body);
   screen.classList.add("is-form");
@@ -1140,6 +1140,7 @@ function wireCompactForm(screen,isEdit){
     pl.innerHTML=d._proofs.map((p,i)=>{const isImg=p.file_type&&p.file_type.startsWith("image");const url=isImg?URL.createObjectURL(p.blob):null;return `<div class="proof-thumb">${isImg?`<img src="${url}">`:`<span class="pdf">PDF</span>`}<span class="del" data-i="${i}">&#215;</span></div>`;}).join("")+`<button class="add-proof" id="cAddProof"><span class="plus">+</span>Add</button>`;
     q("#cAddProof").addEventListener("click",()=>q("#cFile").click());
     $$(".proof-thumb .del",pl).forEach(x=>x.addEventListener("click",()=>{d._proofs.splice(+x.dataset.i,1);renderProofs();}));
+    $$(".proof-thumb img",pl).forEach(im=>{ im.style.cursor="pointer"; im.addEventListener("click",()=>viewImage(im.src)); });
   }
   q("#cCompany").addEventListener("change",e=>{d.company_id=e.target.value;const c=state.companies.find(x=>x.id===d.company_id);if(c&&c.default_currency){d.currency=c.default_currency;q("#cCur").value=c.default_currency;}});
   q("#cType").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;d.type=b.dataset.t;$$("#cType button",screen).forEach(x=>x.classList.toggle("on",x===b));applyType();});
@@ -1226,6 +1227,8 @@ async function openDetail(id){
     ${activeBe?`<div class="hint" style="margin-top:16px;">This entry is part of a submitted claim, so its status is set by that claim — not editable here. To change or remove it, open the claim and undo it first.</div>
     <button class="btn btn-ghost" id="goClaimBtn" style="margin-top:10px;">View claim</button>`:""}
 
+    ${e.status==="unclaimed"?`<button class="btn btn-danger" id="delBtn" style="margin-top:10px;">Delete entry</button>`:""}
+
     ${edits.length?`<div class="section-label">Edit history</div>
       <div class="kv" style="padding:4px 15px;"><div class="edit-log">
         ${edits.map(ed=>`<div class="e"><strong>${fmtDateTime(ed.edited_at)}</strong> — ${esc(summarizeChanges(ed.changes))}${ed.reason?`<br><em>“${esc(ed.reason)}”</em>`:""}</div>`).join("")}
@@ -1236,6 +1239,7 @@ async function openDetail(id){
   sc.querySelector("#detEdit").addEventListener("click",goEdit);
   sc.querySelector("#editBtn").addEventListener("click",goEdit);
   sc.querySelector("#dupBtn").addEventListener("click",()=>duplicateEntry(e));
+  sc.querySelector("#delBtn")?.addEventListener("click",()=>confirmDelete(e.id,sc));
   sc.querySelector("#goClaimBtn")?.addEventListener("click",()=>{ closeTopScreen(); setTimeout(()=>openBatchDetail(activeBe.batch_id),260); });
 }
 
@@ -1450,9 +1454,12 @@ async function openBatchDetail(batchId){
 
   let actionBtn="";
   if(pendingCount>0){
-    actionBtn=`<button class="btn btn-ghost" id="allPaid" style="margin-top:10px;">Mark all pending as reimbursed</button>`;
+    actionBtn+=`<button class="btn btn-ghost" id="allPaid" style="margin-top:10px;">Mark all pending as reimbursed</button>`;
   }else if(reimbursedCount>0){
-    actionBtn=`<button class="btn btn-ghost" id="undoReimb" style="margin-top:10px;color:var(--danger);">Undo reimbursement</button>`;
+    actionBtn+=`<button class="btn btn-ghost" id="undoReimb" style="margin-top:10px;color:var(--danger);">Undo reimbursement</button>`;
+  }
+  if(reimbursedCount===0){ // nothing paid yet → the whole claim can be cancelled
+    actionBtn+=`<button class="btn btn-danger" id="cancelClaim" style="margin-top:10px;">Cancel claim (return items to Unclaimed)</button>`;
   }
 
   const body=`
@@ -1478,6 +1485,7 @@ async function openBatchDetail(batchId){
   const slipThumb=sc.querySelector("#rbSlipThumb"); if(slipThumb) slipThumb.addEventListener("click",()=>viewImage(batch.reimburse_proof));
   const allPaidBtn=sc.querySelector("#allPaid"); if(allPaidBtn) allPaidBtn.addEventListener("click",()=>reimburseBatchSheet(batchId,items,sc));
   const undoBtn=sc.querySelector("#undoReimb"); if(undoBtn) undoBtn.addEventListener("click",()=>undoReimbursement(batchId,sc));
+  const cancelBtn=sc.querySelector("#cancelClaim"); if(cancelBtn) cancelBtn.addEventListener("click",()=>cancelClaim(batchId,sc));
 }
 
 function viewImage(src){
@@ -1541,6 +1549,26 @@ function undoReimbursement(batchId,sc){
     for(const be of items){ if(be.outcome==="reimbursed"){ be.outcome="pending"; be.outcome_updated_at=Date.now(); await DB.put("batch_entries",be);
       const e=state.entries.find(x=>x.id===be.entry_id); if(e){ e.status="submitted"; await DB.put("entries",e); } } }
     await loadAll(); refreshCurrent(); closeSheet(); closeScreen(sc); setTimeout(()=>openBatchDetail(batchId),260); toast("Reimbursement undone");
+  });
+}
+
+// Cancel a claim that has NOT been reimbursed: return every item to Unclaimed and delete
+// the batch entirely. Only offered when no item is reimbursed.
+function cancelClaim(batchId,sc){
+  openSheet(`<h3>Cancel this claim?</h3>
+    <p class="hint" style="margin-bottom:14px;">All items go back to <strong>Unclaimed</strong> and this claim is <strong>deleted</strong>. Nothing here has been reimbursed, so no payment record is lost. This can't be undone.</p>
+    <button class="btn btn-danger" id="cancelYes">Cancel claim &amp; delete</button>
+    <button class="btn btn-ghost" id="cancelNo" style="margin-top:10px;">Keep claim</button>`);
+  document.querySelector("#cancelNo").addEventListener("click",closeSheet);
+  document.querySelector("#cancelYes").addEventListener("click",async()=>{
+    const items=await DB.getByIndex("batch_entries","batch_id",batchId);
+    for(const be of items){
+      const e=state.entries.find(x=>x.id===be.entry_id);
+      if(e){ e.status="unclaimed"; await DB.put("entries",e); }
+      await DB.del("batch_entries",be.id);
+    }
+    await DB.del("batches",batchId);
+    await loadAll(); refreshCurrent(); closeSheet(); closeScreen(sc); toast("Claim cancelled");
   });
 }
 
@@ -1749,10 +1777,9 @@ function openSettings(){
     </div>
     <div class="hint" style="margin-top:10px;"><strong>${state.lastBackupAt?`Last backup ${timeAgo(state.lastBackupAt)}.`:"You haven’t made a backup yet."}</strong> Your data lives on this device only. A full backup packs <strong>everything — entries, companies, claims and receipt files</strong> — into one file. Save it to your cloud (Drive, Dropbox, email to yourself); if this phone is lost or the browser is cleared, Restore rebuilds the app from it.</div>
 
-    <div class="section-label">Try it out</div>
+    <div class="section-label">Testing tools</div>
     <div class="list-choice">
-      <button id="sSeed">Load 20 sample entries <span class="check">＋</span></button>
-      <button id="sWipe" style="color:var(--danger)">Clear all data <span class="check">×</span></button>
+      <button id="sTesting">Sample data &amp; reset <span class="check">›</span></button>
     </div>
 
     <div class="section-label">About</div>
@@ -1772,6 +1799,22 @@ function openSettings(){
   });
   sc.querySelector("#sBackup").addEventListener("click",exportBackup);
   sc.querySelector("#sImport").addEventListener("click",importBackup);
+  sc.querySelector("#sTesting").addEventListener("click",openTestingTools);
+}
+
+function openTestingTools(){
+  const body=`
+    <div class="warn" style="background:#fdecec;color:var(--danger);">These tools change or erase your data — back up first.</div>
+    <div class="section-label">Sample data</div>
+    <div class="list-choice">
+      <button id="sSeed">Load 20 sample entries <span class="check">＋</span></button>
+    </div>
+    <div class="section-label">Danger zone</div>
+    <div class="list-choice">
+      <button id="sWipe" style="color:var(--danger)">Clear all data <span class="check">×</span></button>
+    </div>
+  `;
+  const sc=openScreen("Testing tools", body);
   sc.querySelector("#sSeed").addEventListener("click",seedExamples);
   sc.querySelector("#sWipe").addEventListener("click",()=>{
     openSheet(`<h3>Clear all data?</h3><p class="hint" style="margin-bottom:14px;">Removes every entry, company, claim and receipt from this device. Cannot be undone.</p><button class="btn btn-danger" id="wipeYes">Clear everything</button><button class="btn btn-ghost" id="wipeNo" style="margin-top:10px;">Cancel</button>`);
@@ -2068,8 +2111,8 @@ function cropImage(file){
 
       const box=ov.querySelector(".crop-box");
       const MIN=32;
-      let cx=Math.round(dispW*0.1), cy=Math.round(dispH*0.1);
-      let cw=Math.round(dispW*0.8), ch=Math.round(dispH*0.8);
+      let cx=0, cy=0;            // crop box starts as the FULL image by default
+      let cw=dispW, ch=dispH;
       function apply(){ box.style.left=cx+"px"; box.style.top=cy+"px"; box.style.width=cw+"px"; box.style.height=ch+"px"; }
       apply();
 
