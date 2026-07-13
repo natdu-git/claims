@@ -747,6 +747,12 @@ function newDraft(){
 let draft=null;
 
 async function openAddEntry(existing){
+  if(existing){
+    const current=await DB.get("entries",existing.id);
+    if(!current){toast("This entry no longer exists");return;}
+    if(current.status!=="unclaimed"){toast("This entry is in a claim — cancel or undo the claim to edit it");return;}
+    existing=current;
+  }
   if(state.companies.length===0){
     toast("Add a company first");
     openCompanies(true);
@@ -1049,14 +1055,9 @@ function confirmDelete(id,screen){
     <button class="btn btn-danger" id="delYes">Delete</button>
     <button class="btn btn-ghost" id="delNo" style="margin-top:10px;">Cancel</button>`);
   $("#delYes").addEventListener("click",async()=>{
-    const proofs=await DB.getByIndex("proofs","entry_id",id);
-    for(const p of proofs) await DB.del("proofs",p.id);
-    await DB.del("entries",id);
-    await loadAll();
-    refreshCurrent();
-    closeSheet();
-    if(screen) closeScreen(screen);
-    toast("Entry deleted");
+    const btn=$("#delYes");if(btn.dataset.busy)return;btn.dataset.busy="1";btn.disabled=true;
+    try{await deleteEntryAtomic(id);await loadAll();refreshCurrent();closeSheet();if(screen)closeScreen(screen);toast("Entry deleted");}
+    catch(e){console.error("Entry deletion failed",e);toast(e.message||"Entry could not be deleted");delete btn.dataset.busy;btn.disabled=false;}
   });
   $("#delNo").addEventListener("click",closeSheet);
 }
@@ -1305,9 +1306,9 @@ async function openDetail(id){
 
     ${(e.type==='travel'&&e.location_lat!=null)?`<a class="btn btn-ghost" href="https://www.google.com/maps?q=${e.location_lat},${e.location_lng}" target="_blank" rel="noopener" style="margin-top:12px;">View location on map</a>`:""}
 
-    <button class="btn btn-ghost" id="editBtn" style="margin-top:22px;">Edit entry</button>
+    ${e.status==="unclaimed"?`<button class="btn btn-ghost" id="editBtn" style="margin-top:22px;">Edit entry</button>`:""}
     <button class="btn btn-ghost" id="dupBtn" style="margin-top:10px;">Duplicate as new entry</button>
-    ${activeBe?`<div class="hint" style="margin-top:16px;">This entry is part of a submitted claim, so its status is set by that claim — not editable here. To change or remove it, open the claim and undo it first.</div>
+    ${activeBe?`<div class="hint" style="margin-top:16px;">This entry can’t be edited or deleted while it belongs to this claim. Cancel the claim or undo reimbursement first, or use Duplicate as new entry.</div>
     <button class="btn btn-ghost" id="goClaimBtn" style="margin-top:10px;">View claim</button>`:""}
 
     ${e.status==="unclaimed"?`<button class="btn btn-danger" id="delBtn" style="margin-top:10px;">Delete entry</button>`:""}
@@ -1317,10 +1318,10 @@ async function openDetail(id){
         ${edits.map(ed=>`<div class="e"><strong>${fmtDateTime(ed.edited_at)}</strong> — ${esc(summarizeChanges(ed.changes))}${ed.reason?`<br><em>“${esc(ed.reason)}”</em>`:""}</div>`).join("")}
       </div></div>`:""}
   `;
-  const sc=openScreen("Entry", body, `<button id="detEdit">Edit</button>`);
+  const sc=openScreen("Entry", body, e.status==="unclaimed"?`<button id="detEdit">Edit</button>`:"");
   const goEdit=async()=>{ await openAddEntry(e); };
-  sc.querySelector("#detEdit").addEventListener("click",goEdit);
-  sc.querySelector("#editBtn").addEventListener("click",goEdit);
+  sc.querySelector("#detEdit")?.addEventListener("click",goEdit);
+  sc.querySelector("#editBtn")?.addEventListener("click",goEdit);
   sc.querySelector("#dupBtn").addEventListener("click",()=>duplicateEntry(e));
   sc.querySelector("#delBtn")?.addEventListener("click",()=>confirmDelete(e.id,sc));
   sc.querySelector("#goClaimBtn")?.addEventListener("click",()=>{ closeTopScreen(); setTimeout(()=>openBatchDetail(activeBe.batch_id),260); });
@@ -1623,6 +1624,83 @@ function viewImage(src){
   document.body.appendChild(ov);
 }
 
+function lifecycleError(message){const e=new Error(message);e.code="LIFECYCLE_INVALID";return e;}
+function statusForOutcome(outcome){return outcome==="pending"?"submitted":outcome==="reimbursed"?"reimbursed":outcome==="rejected"?"unclaimed":null;}
+function clearBatchReimbursement(batch){delete batch.reimbursed_date;delete batch.reimbursed_at;delete batch.reimburse_proof;delete batch.reimburse_proof_type;}
+async function readBatchLifecycle(s,req,batchId){
+  const batch=await req(s.batches.get(batchId));if(!batch)throw lifecycleError("This claim no longer exists");
+  const items=await req(s.batch_entries.index("batch_id").getAll(IDBKeyRange.only(batchId)));if(!items.length)throw lifecycleError("This claim has no items");
+  const entries=new Map();
+  for(const be of items){
+    if(be.batch_id!==batchId||!statusForOutcome(be.outcome))throw lifecycleError("This claim contains an invalid item");
+    const entry=await req(s.entries.get(be.entry_id));if(!entry)throw lifecycleError("A claim entry no longer exists");
+    const memberships=await req(s.batch_entries.index("entry_id").getAll(IDBKeyRange.only(be.entry_id)));
+    const active=memberships.filter(x=>x.outcome==="pending"||x.outcome==="reimbursed");
+    if(active.length>1)throw lifecycleError("An entry belongs to more than one active claim");
+    if(be.outcome!=="rejected"){
+      if(active.length!==1||active[0].id!==be.id||entry.status!==statusForOutcome(be.outcome))throw lifecycleError("A claim item and entry status disagree");
+    }else if(active.length===0&&entry.status!=="unclaimed")throw lifecycleError("A rejected item and entry status disagree");
+    else if(active.length===1&&entry.status!==statusForOutcome(active[0].outcome))throw lifecycleError("A reclaimed entry has an inconsistent status");
+    entries.set(be.entry_id,entry);
+  }
+  return {batch,items,entries};
+}
+async function markBatchReimbursedAtomic(batchId,date,slipUrl,slipType){
+  return DB.runTransaction(["batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
+    const {batch,items,entries}=await readBatchLifecycle(s,req,batchId),now=Date.now();
+    if(!validISODate(date))throw lifecycleError("Choose a valid reimbursement date");
+    for(const be of items)if(be.outcome!=="pending"||entries.get(be.entry_id).status!=="submitted")throw lifecycleError("Every claim item must still be pending");
+    let first=true;for(const be of items){be.outcome="reimbursed";be.outcome_updated_at=now;await req(s.batch_entries.put(be));if(first){auditFail("reimburse-after-first-item");first=false;}const entry=entries.get(be.entry_id);entry.status="reimbursed";entry.updated_at=now;await req(s.entries.put(entry));if(be===items[0])auditFail("reimburse-after-first-entry");}
+    batch.reimbursed_date=date;batch.reimbursed_at=now;batch.reimburse_proof=slipUrl||null;batch.reimburse_proof_type=slipType||null;await req(s.batches.put(batch));auditFail("reimburse-after-batch-metadata");
+  });
+}
+async function undoReimbursementAtomic(batchId){
+  return DB.runTransaction(["batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
+    const {batch,items,entries}=await readBatchLifecycle(s,req,batchId),now=Date.now();
+    if(!batch.reimbursed_date&&!batch.reimbursed_at)throw lifecycleError("This claim is not marked reimbursed");
+    const paid=items.filter(x=>x.outcome==="reimbursed");if(!paid.length)throw lifecycleError("This claim has no reimbursed items");
+    if(items.some(x=>x.outcome==="pending"))throw lifecycleError("This claim contains pending items");
+    for(let i=0;i<paid.length;i++){const be=paid[i],entry=entries.get(be.entry_id);be.outcome="pending";be.outcome_updated_at=now;await req(s.batch_entries.put(be));if(i===0)auditFail("undo-after-first-item");entry.status="submitted";entry.updated_at=now;await req(s.entries.put(entry));if(i===0)auditFail("undo-after-first-entry");}
+    clearBatchReimbursement(batch);await req(s.batches.put(batch));auditFail("undo-after-batch-metadata");
+  });
+}
+async function setItemOutcomeAtomic(beId,batchId,expectedOutcome,newOutcome){
+  return DB.runTransaction(["batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
+    const batch=await req(s.batches.get(batchId));if(!batch)throw lifecycleError("This claim no longer exists");
+    const be=await req(s.batch_entries.get(beId));if(!be||be.batch_id!==batchId)throw lifecycleError("This claim item no longer exists");
+    if(be.outcome!==expectedOutcome)throw lifecycleError("This claim item changed — refresh and try again");
+    if(!["pending","reimbursed","rejected"].includes(newOutcome)||newOutcome===be.outcome)throw lifecycleError("That item transition is no longer available");
+    const entry=await req(s.entries.get(be.entry_id));if(!entry)throw lifecycleError("The referenced entry no longer exists");
+    const expected=statusForOutcome(be.outcome);if(entry.status!==expected)throw lifecycleError("The claim item and entry status disagree");
+    const allowed=(be.outcome==="pending"&&["reimbursed","rejected"].includes(newOutcome))||(be.outcome==="reimbursed"&&["pending","rejected"].includes(newOutcome))||(be.outcome==="rejected"&&newOutcome==="pending");if(!allowed)throw lifecycleError("That item transition is not allowed");
+    if(be.outcome==="rejected"){
+      const memberships=await req(s.batch_entries.index("entry_id").getAll(IDBKeyRange.only(be.entry_id)));
+      if(memberships.some(x=>x.id!==be.id&&(x.outcome==="pending"||x.outcome==="reimbursed")))throw lifecycleError("This entry already belongs to another active claim");
+    }
+    const now=Date.now();be.outcome=newOutcome;be.outcome_updated_at=now;await req(s.batch_entries.put(be));auditFail("item-outcome-after-batch-entry");entry.status=statusForOutcome(newOutcome);entry.updated_at=now;await req(s.entries.put(entry));auditFail("item-outcome-after-entry");
+    if(newOutcome!=="reimbursed"&&(batch.reimbursed_date||batch.reimbursed_at||batch.reimburse_proof)){clearBatchReimbursement(batch);await req(s.batches.put(batch));}
+  });
+}
+async function cancelClaimAtomic(batchId){
+  return DB.runTransaction(["batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
+    const {batch,items,entries}=await readBatchLifecycle(s,req,batchId),now=Date.now();
+    if(items.some(x=>x.outcome==="reimbursed"))throw lifecycleError("Undo reimbursement before cancelling this claim");
+    if(items.some(x=>x.outcome!=="pending"&&x.outcome!=="rejected"))throw lifecycleError("This claim contains an invalid item");
+    for(let i=0;i<items.length;i++){const be=items[i],entry=entries.get(be.entry_id);if(be.outcome==="pending"){entry.status="unclaimed";entry.updated_at=now;await req(s.entries.put(entry));if(i===0)auditFail("cancel-after-first-entry");}else if(entry.status!=="unclaimed")throw lifecycleError("A rejected claim entry is active elsewhere");await req(s.batch_entries.delete(be.id));if(i===0)auditFail("cancel-after-first-item-delete");}
+    auditFail("cancel-before-batch-delete");await req(s.batches.delete(batch.id));auditFail("cancel-after-batch-delete");
+  });
+}
+async function deleteEntryAtomic(id){
+  return DB.runTransaction(["entries","proofs","batch_entries","edits"],"readwrite",async(s,t,req)=>{
+    const entry=await req(s.entries.get(id));if(!entry)throw lifecycleError("This entry no longer exists");if(entry.status!=="unclaimed")throw lifecycleError("This entry is in a claim — cancel or undo the claim to delete it");
+    const memberships=await req(s.batch_entries.index("entry_id").getAll(IDBKeyRange.only(id)));if(memberships.length)throw lifecycleError("This entry has claim history and can’t be deleted");
+    const proofs=await req(s.proofs.index("entry_id").getAll(IDBKeyRange.only(id))),edits=await req(s.edits.index("entry_id").getAll(IDBKeyRange.only(id)));
+    for(let i=0;i<proofs.length;i++){await req(s.proofs.delete(proofs[i].id));if(i===0)auditFail("delete-entry-after-first-proof");}
+    for(const edit of edits)await req(s.edits.delete(edit.id));
+    auditFail("delete-entry-before-entry-delete");await req(s.entries.delete(id));auditFail("delete-entry-after-entry-delete");
+  });
+}
+
 // Batch-level reimbursement: capture the date + an optional payment-slip photo,
 // then mark all pending items reimbursed. Slip is stored as a base64 data URL on
 // the batch record so it travels inside JSON backups.
@@ -1652,13 +1730,9 @@ function reimburseBatchSheet(batchId,items,sc){
   q("#rbConfirm").addEventListener("click",async()=>{
     const date=q("#rbDate").value;
     if(!date){ toast("Choose a date"); return; }
-    const batch=await DB.get("batches",batchId);
-    batch.reimbursed_date=date; batch.reimbursed_at=Date.now();
-    batch.reimburse_proof=slipUrl; batch.reimburse_proof_type=slipType;
-    await DB.put("batches",batch);
-    for(const be of items){ if(be.outcome==="pending"){ be.outcome="reimbursed"; be.outcome_updated_at=Date.now(); await DB.put("batch_entries",be);
-      const e=state.entries.find(x=>x.id===be.entry_id); if(e){ e.status="reimbursed"; await DB.put("entries",e); } } }
-    await loadAll(); refreshCurrent(); closeSheet(); closeScreen(sc); setTimeout(()=>openBatchDetail(batchId),260); toast("Batch marked reimbursed");
+    const btn=q("#rbConfirm");if(btn.dataset.busy)return;btn.dataset.busy="1";btn.disabled=true;
+    try{await markBatchReimbursedAtomic(batchId,date,slipUrl,slipType);await loadAll();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("Batch marked reimbursed");}
+    catch(e){console.error("Batch reimbursement failed",e);toast(e.message||"Claim could not be updated");delete btn.dataset.busy;btn.disabled=false;}
   });
 }
 
@@ -1669,13 +1743,9 @@ function undoReimbursement(batchId,sc){
     <button class="btn btn-ghost" id="undoNo" style="margin-top:10px;">Cancel</button>`);
   document.querySelector("#undoNo").addEventListener("click",closeSheet);
   document.querySelector("#undoYes").addEventListener("click",async()=>{
-    const batch=await DB.get("batches",batchId);
-    delete batch.reimbursed_date; delete batch.reimbursed_at; delete batch.reimburse_proof; delete batch.reimburse_proof_type;
-    await DB.put("batches",batch);
-    const items=await DB.getByIndex("batch_entries","batch_id",batchId);
-    for(const be of items){ if(be.outcome==="reimbursed"){ be.outcome="pending"; be.outcome_updated_at=Date.now(); await DB.put("batch_entries",be);
-      const e=state.entries.find(x=>x.id===be.entry_id); if(e){ e.status="submitted"; await DB.put("entries",e); } } }
-    await loadAll(); refreshCurrent(); closeSheet(); closeScreen(sc); setTimeout(()=>openBatchDetail(batchId),260); toast("Reimbursement undone");
+    const btn=document.querySelector("#undoYes");if(btn.dataset.busy)return;btn.dataset.busy="1";btn.disabled=true;
+    try{await undoReimbursementAtomic(batchId);await loadAll();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("Reimbursement undone");}
+    catch(e){console.error("Undo reimbursement failed",e);toast(e.message||"Reimbursement could not be undone");delete btn.dataset.busy;btn.disabled=false;}
   });
 }
 
@@ -1688,14 +1758,9 @@ function cancelClaim(batchId,sc){
     <button class="btn btn-ghost" id="cancelNo" style="margin-top:10px;">Keep claim</button>`);
   document.querySelector("#cancelNo").addEventListener("click",closeSheet);
   document.querySelector("#cancelYes").addEventListener("click",async()=>{
-    const items=await DB.getByIndex("batch_entries","batch_id",batchId);
-    for(const be of items){
-      const e=state.entries.find(x=>x.id===be.entry_id);
-      if(e){ e.status="unclaimed"; await DB.put("entries",e); }
-      await DB.del("batch_entries",be.id);
-    }
-    await DB.del("batches",batchId);
-    await loadAll(); refreshCurrent(); closeSheet(); closeScreen(sc); toast("Claim cancelled");
+    const btn=document.querySelector("#cancelYes");if(btn.dataset.busy)return;btn.dataset.busy="1";btn.disabled=true;
+    try{await cancelClaimAtomic(batchId);await loadAll();refreshCurrent();closeSheet();closeScreen(sc);toast("Claim cancelled");}
+    catch(e){console.error("Claim cancellation failed",e);toast(e.message||"Claim could not be cancelled");delete btn.dataset.busy;btn.disabled=false;}
   });
 }
 
@@ -1713,17 +1778,9 @@ async function itemOutcomeSheet(beId,entryId,batchId){
         : `<button data-o="${x.o}">${x.label}</button>`).join("")}
     </div>`);
   $$("#sheet .list-choice button[data-o]").forEach(b=>b.addEventListener("click",async()=>{
-    const o=b.dataset.o;
-    const be=await DB.get("batch_entries",beId);
-    be.outcome=o;be.outcome_updated_at=Date.now();await DB.put("batch_entries",be);
-    const e=state.entries.find(x=>x.id===entryId);
-    if(e){
-      if(o==="reimbursed")e.status="reimbursed";
-      else if(o==="rejected")e.status="unclaimed";
-      else e.status="submitted";
-      await DB.put("entries",e);
-    }
-    await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Updated");
+    if(b.dataset.busy)return;b.dataset.busy="1";b.disabled=true;
+    try{await setItemOutcomeAtomic(beId,batchId,cur,b.dataset.o);await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Updated");}
+    catch(e){console.error("Item outcome update failed",e);toast(e.message||"Item could not be updated");delete b.dataset.busy;b.disabled=false;}
   }));
 }
 
