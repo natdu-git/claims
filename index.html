@@ -434,12 +434,13 @@ async function nextClaimNo(companyId, year){
 }
 // One-time backfill: give existing batches a claim_no, oldest first, using each batch's own year.
 async function migrateClaimIds(){
-  const batches=(await DB.getAll("batches")).filter(b=>!b.claim_no).sort((a,b)=>(a.created_at||0)-(b.created_at||0));
-  for(const b of batches){
-    const year=new Date(b.created_at||Date.now()).getFullYear();
-    b.claim_no=await nextClaimNo(b.company_id, year);
-    await DB.put("batches",b);
-  }
+  await DB.runTransaction(["companies","meta","batches"],"readwrite",async(s,t,req)=>{
+    const all=await req(s.batches.getAll()),missing=all.filter(b=>!b.claim_no).sort((a,b)=>(a.created_at||0)-(b.created_at||0));
+    if(!missing.length)return;
+    const counters=new Map();
+    for(const b of all){if(!b.claim_no)continue;const m=String(b.claim_no).match(/-(\d{4})-(\d+)$/);if(m){const k=`${b.company_id}:${m[1]}`;counters.set(k,Math.max(counters.get(k)||0,+m[2]));}}
+    for(const b of missing){const company=await req(s.companies.get(b.company_id));if(!company)throw new Error("Cannot migrate a claim with a missing company");const year=new Date(b.created_at||Date.now()).getFullYear(),key=`claimseq:${b.company_id}:${year}`,mk=`${b.company_id}:${year}`,meta=await req(s.meta.get(key));const next=Math.max(counters.get(mk)||0,Number.isSafeInteger(meta?.v)?meta.v:0)+1;const code=(company.code||codeFromName(company.name)).toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6)||"CO";b.claim_no=`${code}-${year}-${String(next).padStart(3,"0")}`;await req(s.meta.put({k:key,v:next}));await req(s.batches.put(b));counters.set(mk,next);}
+  });
 }
 
 /* ---------- tiny DOM helpers ---------- */
@@ -497,6 +498,15 @@ const DB = (()=>{
   }
   function tx(stores,mode="readonly"){return db.transaction(stores,mode);}
   function reqP(r){return new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+  function txDone(t){return new Promise((res,rej)=>{t.oncomplete=()=>res();t.onabort=()=>rej(t._appError||t.error||new Error("Transaction aborted"));t.onerror=()=>{};});}
+  async function runTransaction(stores,mode,worker){
+    const t=tx(stores,mode), handles={};
+    (Array.isArray(stores)?stores:[stores]).forEach(n=>handles[n]=t.objectStore(n));
+    const done=txDone(t); let result;
+    try{ result=await worker(handles,t,reqP); }
+    catch(err){ t._appError=err;try{t.abort();}catch(_){} await done.catch(()=>{});throw err; }
+    await done; return result;
+  }
   function getAll(store,index,query){
     const t=tx(store);const s=t.objectStore(store);
     const src=index?s.index(index):s;
@@ -506,7 +516,7 @@ const DB = (()=>{
   function put(store,val){const t=tx(store,"readwrite");t.objectStore(store).put(val);return new Promise((res,rej)=>{t.oncomplete=()=>res(val);t.onerror=()=>rej(t.error);});}
   function del(store,key){const t=tx(store,"readwrite");t.objectStore(store).delete(key);return new Promise((res,rej)=>{t.oncomplete=res;t.onerror=()=>rej(t.error);});}
   function bulkPut(store,vals){const t=tx(store,"readwrite");const s=t.objectStore(store);vals.forEach(v=>s.put(v));return new Promise((res,rej)=>{t.oncomplete=res;t.onerror=()=>rej(t.error);});}
-  return {open,getAll,get,put,del,bulkPut,
+  return {open,getAll,get,put,del,bulkPut,runTransaction,reqP,raw:()=>db,
     getByIndex:(store,index,val)=>getAll(store,index,IDBKeyRange.only(val))};
 })();
 
@@ -1441,35 +1451,63 @@ async function renderClaim(){
   }));
 }
 
+function validISODate(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v||""))return false;const d=new Date(v+"T00:00:00Z");return !isNaN(d)&&d.toISOString().slice(0,10)===v;}
+function claimError(message,entryId){const e=new Error(message);e.code="CLAIM_INVALID";e.entryId=entryId||null;return e;}
+function auditFail(step){if(window.__claimsTestFailAt===step)throw new Error(`Injected failure: ${step}`);}
+async function createClaimAtomic(input){
+  const ids=[...input.entryIds];
+  if(!ids.length)throw claimError("Choose at least one entry");
+  if(new Set(ids).size!==ids.length)throw claimError("The claim contains a duplicate entry");
+  if(!validISODate(input.rangeStart)||!validISODate(input.rangeEnd)||input.rangeStart>input.rangeEnd)throw claimError("The claim date range is invalid");
+  if(!validISODate(input.submittedDate))throw claimError("The submission date is invalid");
+  const year=+input.submittedDate.slice(0,4),now=Date.now(),batchId=uid();
+  return DB.runTransaction(["companies","meta","batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
+    const company=await req(s.companies.get(input.companyId));
+    if(!company||company.archived)throw claimError("The selected company is unavailable");
+    const entries=[];
+    for(const id of ids){
+      const e=await req(s.entries.get(id));
+      if(!e)throw claimError("A selected entry no longer exists",id);
+      if(e.status!=="unclaimed")throw claimError("A selected entry is no longer unclaimed",id);
+      if(e.company_id!==input.companyId)throw claimError("A selected entry belongs to another company",id);
+      if(!["expense","travel"].includes(e.type)||!["THB","RMB","USD"].includes(e.currency))throw claimError("A selected entry has invalid type or currency",id);
+      if(!Number.isSafeInteger(e.amount_minor)||e.amount_minor<0)throw claimError("A selected entry has an invalid amount",id);
+      if(e.type==="expense"&&e.amount_minor<=0)throw claimError("Expense amounts must be greater than zero",id);
+      if(e.type==="travel"&&e.amount_minor===0)throw claimError("Zero-value Travel records cannot be claimed",id);
+      if(!validISODate(e.payment_date)||e.payment_date<input.rangeStart||e.payment_date>input.rangeEnd)throw claimError("A selected entry is outside the claim date range",id);
+      if(e.currency!=="THB"&&(!Number.isSafeInteger(e.claim_thb_minor)||e.claim_thb_minor<=0))throw claimError("A foreign entry needs a positive THB claim amount",id);
+      const memberships=await req(s.batch_entries.index("entry_id").getAll(IDBKeyRange.only(id)));
+      for(const be of memberships){
+        if(be.outcome==="rejected")continue;
+        if(be.outcome!=="pending"&&be.outcome!=="reimbursed")throw claimError("A selected entry has an invalid claim history",id);
+        if(!await req(s.batches.get(be.batch_id)))throw claimError("A selected entry has a broken claim reference",id);
+        throw claimError("A selected entry already belongs to an active claim",id);
+      }
+      entries.push(e);
+    }
+    const seqKey=`claimseq:${company.id}:${year}`,seqRec=await req(s.meta.get(seqKey));
+    let max=Number.isSafeInteger(seqRec?.v)&&seqRec.v>=0?seqRec.v:0;
+    const batches=await req(s.batches.getAll());
+    for(const b of batches){if(b.company_id===company.id&&b.claim_no){const m=String(b.claim_no).match(/-(\d{4})-(\d+)$/);if(m&&+m[1]===year&&Number.isSafeInteger(+m[2]))max=Math.max(max,+m[2]);}}
+    const sequence=max+1;if(!Number.isSafeInteger(sequence))throw claimError("The claim sequence is too large");
+    const code=(company.code||codeFromName(company.name)).toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6)||"CO";
+    const claimNo=`${code}-${year}-${String(sequence).padStart(3,"0")}`;
+    if(batches.some(b=>b.claim_no===claimNo))throw claimError("That claim number already exists; refresh and try again");
+    const batch={id:batchId,company_id:company.id,submitted_date:input.submittedDate,range_start:input.rangeStart,range_end:input.rangeEnd,note:"",created_at:now,claim_no:claimNo};
+    await req(s.meta.put({k:seqKey,v:sequence}));auditFail("claim-after-counter");await req(s.batches.put(batch));auditFail("claim-after-batch");
+    for(const e of entries){const thb=e.currency==="THB"?e.amount_minor:e.claim_thb_minor;
+      await req(s.batch_entries.put({id:uid(),batch_id:batchId,entry_id:e.id,amount_minor_snapshot:thb,currency_snapshot:"THB",original_amount_minor:e.amount_minor,original_currency:e.currency,vendor_snapshot:e.vendor||company.name,date_snapshot:e.payment_date,outcome:"pending",outcome_updated_at:null}));auditFail("claim-after-batch-entry");
+      await req(s.entries.put({...e,status:"submitted",updated_at:now}));auditFail("claim-after-entry");}
+    return {batchId,claimNo,sequence,entryCount:entries.length};
+  });
+}
 async function generateBatch(list,screen){
-  const selected=list.filter(e=>claimState.selected.has(e.id));
-  if(selected.length===0)return;
-  // Claims are in THB — every foreign item needs a THB claim amount before it can go in.
-  const needThb=selected.filter(e=>claimThb(e)===null);
-  if(needThb.length){ toast(`${needThb.length} foreign item${needThb.length>1?"s":""} still need a THB claim amount`); return; }
-  const now=Date.now();
-  const batchId=uid();
-  const batch={id:batchId, company_id:claimState.company, submitted_date:todayISO(),
-    range_start:claimState.from, range_end:claimState.to, note:"", created_at:now,
-    claim_no: await nextClaimNo(claimState.company)};
-  await DB.put("batches",batch);
-  for(const e of selected){
-    const thb=claimThb(e);   // THB claim value; foreign items are converted, original kept for reference
-    await DB.put("batch_entries",{id:uid(),batch_id:batchId,entry_id:e.id,
-      amount_minor_snapshot: thb!=null?thb:e.amount_minor,
-      currency_snapshot: thb!=null?"THB":e.currency,
-      original_amount_minor:e.amount_minor, original_currency:e.currency,
-      vendor_snapshot:e.vendor||companyName(e.company_id), date_snapshot:e.payment_date,
-      outcome:"pending",outcome_updated_at:null});
-    e.status="submitted"; await DB.put("entries",e);
-  }
-  await loadAll();
-  closeScreen(screen);
-  claimState.selected=new Set();
-  // offer CSV
-  exportBatchCSV(batchId);
-  toast(`Claim created · ${selected.length} items marked submitted`);
-  setTimeout(()=>openBatchDetail(batchId),300);
+  const btn=screen.querySelector("#genBtn");if(btn?.dataset.busy)return;
+  const ids=[...claimState.selected];if(!ids.length)return;
+  if(btn){btn.dataset.busy="1";btn.disabled=true;btn.textContent="Creating claim…";}
+  try{const result=await createClaimAtomic({companyId:claimState.company,entryIds:ids,rangeStart:claimState.from,rangeEnd:claimState.to,submittedDate:todayISO()});
+    await loadAll();closeScreen(screen);claimState.selected=new Set();exportBatchCSV(result.batchId);toast(`Claim created · ${result.entryCount} items marked submitted`);setTimeout(()=>openBatchDetail(result.batchId),300);
+  }catch(err){console.error("Claim creation failed",err);toast(err.message||"Claim creation failed — refresh and try again");if(btn){delete btn.dataset.busy;btn.disabled=false;btn.textContent=`Generate claim · ${ids.length} item${ids.length!==1?"s":""}`;}}
 }
 
 /* ============================================================
@@ -1950,6 +1988,70 @@ function openTestingTools(){
 function blobToBase64(blob){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]||"");r.onerror=()=>rej(r.error);r.readAsDataURL(blob);});}
 function base64ToBlob(b64,type){const bin=atob(b64||"");const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new Blob([arr],{type:type||"application/octet-stream"});}
 
+const APP_STORES=["companies","entries","tags","batches","batch_entries","edits","proofs","meta"];
+const RESTORE_STAGE_DB="ledger_db_restore_stage",RESTORE_RECOVERY_DB="ledger_db_restore_recovery",RESTORE_MARKER="claimsRestorePending";
+const MAX_ATTACHMENT=20*1024*1024,MAX_ATTACHMENTS_TOTAL=250*1024*1024;
+function restoreError(stage,message,store,key){const e=new Error(message);e.stage=stage;e.store=store||null;e.key=key||null;return e;}
+function isPlainObject(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&Object.getPrototypeOf(v)===Object.prototype;}
+function finiteTime(v,optional=false){return optional&&v==null?true:Number.isFinite(v)&&v>=0&&Number.isSafeInteger(v);}
+function safeString(v,max=10000){return typeof v==="string"&&v.length<=max;}
+function strictBase64Bytes(b64,stage="Validating receipts"){
+  if(typeof b64!=="string"||!b64.length||b64.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(b64))throw restoreError(stage,"Receipt data is not valid base64");
+  let bin;try{bin=atob(b64);}catch(e){throw restoreError(stage,"Receipt data is not valid base64");}
+  const out=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);return out;
+}
+function bytesMatchType(bytes,type){
+  if(type==="image/jpeg")return bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff;
+  if(type==="image/png")return bytes.length>7&&bytes[0]===0x89&&bytes[1]===0x50&&bytes[2]===0x4e&&bytes[3]===0x47;
+  if(type==="image/webp")return bytes.length>11&&String.fromCharCode(...bytes.slice(0,4))==="RIFF"&&String.fromCharCode(...bytes.slice(8,12))==="WEBP";
+  if(type==="application/pdf")return bytes.length>4&&String.fromCharCode(...bytes.slice(0,5))==="%PDF-";
+  return false;
+}
+function canonicalDataURL(value,declaredType,total){
+  if(value==null||value==="")return null;
+  const m=String(value).match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]*={0,2})$/);
+  if(!m)throw restoreError("Validating receipts","A reimbursement slip has an unsupported or malformed data URL");
+  const bytes=strictBase64Bytes(m[2]);if(bytes.length>MAX_ATTACHMENT)throw restoreError("Validating receipts","A reimbursement slip exceeds 20 MiB");
+  if(!bytesMatchType(bytes,m[1])||(declaredType&&declaredType!==m[1]))throw restoreError("Validating receipts","A reimbursement slip MIME type does not match its content");
+  total.value+=bytes.length;if(total.value>MAX_ATTACHMENTS_TOTAL)throw restoreError("Validating receipts","Decoded attachments exceed the 250 MiB backup limit");
+  let binary="";for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
+  return `data:${m[1]};base64,${btoa(binary)}`;
+}
+function normalizeBackup(data){
+  const stage="Validating records";if(!isPlainObject(data)||data.app!=="ledger")throw restoreError(stage,"Not a Claims backup");
+  if(data.version!==2)throw restoreError(stage,data.version>2?"This backup was created by a newer Claims version":"This older backup version is not safely supported");
+  if(data.exported_at!=null&&(typeof data.exported_at!=="string"||isNaN(Date.parse(data.exported_at))))throw restoreError(stage,"The export timestamp is invalid");
+  for(const n of APP_STORES)if(!Array.isArray(data[n]))throw restoreError(stage,`Backup store '${n}' is missing`,n);
+  const seen={};for(const n of APP_STORES)seen[n]=new Set();
+  const unique=(store,key)=>{if(typeof key!=="string"||!key||key.length>200)throw restoreError(stage,`Invalid key in ${store}`,store,key);if(seen[store].has(key))throw restoreError(stage,`Duplicate key '${key}' in ${store}; current data was not changed`,store,key);seen[store].add(key);};
+  const currencies=new Set(["THB","RMB","USD"]),out={};
+  out.companies=data.companies.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid company record","companies");unique("companies",x.id);if(!safeString(x.name,500)||!x.name.trim()||!currencies.has(x.default_currency)||typeof x.archived!=="boolean"||!finiteTime(x.created_at)||!/^#[0-9a-f]{6}$/i.test(x.color||"")||!/^[A-Z0-9]{1,6}$/.test(x.code||""))throw restoreError(stage,`Invalid company '${x.id}'`,"companies",x.id);return {...x,name:x.name.trim(),code:x.code.toUpperCase()};});
+  out.entries=data.entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid entry record","entries");unique("entries",x.id);if(typeof x.company_id!=="string"||!["expense","travel"].includes(x.type)||!Number.isSafeInteger(x.amount_minor)||x.amount_minor<0||!currencies.has(x.currency)||(x.claim_thb_minor!=null&&(!Number.isSafeInteger(x.claim_thb_minor)||x.claim_thb_minor<0))||!validISODate(x.payment_date)||!["unclaimed","submitted","reimbursed"].includes(x.status)||!safeString(x.vendor)||!safeString(x.notes)||!safeString(x.location_label||"")||!Array.isArray(x.tags)||x.tags.some(t=>!safeString(t,500))||!(x.location_lat==null&&x.location_lng==null)&&!(Number.isFinite(x.location_lat)&&x.location_lat>=-90&&x.location_lat<=90&&Number.isFinite(x.location_lng)&&x.location_lng>=-180&&x.location_lng<=180)||!finiteTime(x.created_at)||!finiteTime(x.updated_at,true))throw restoreError(stage,`Invalid entry '${x.id}'`,"entries",x.id);return {...x,tags:[...x.tags]};});
+  out.tags=data.tags.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid tag record","tags");unique("tags",x.name);if(!safeString(x.name,500)||!x.name.trim()||!finiteTime(x.created_at,true))throw restoreError(stage,`Invalid tag '${x.name}'`,"tags",x.name);return {...x};});
+  out.batches=data.batches.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch record","batches");unique("batches",x.id);if(typeof x.company_id!=="string"||!validISODate(x.submitted_date)||!validISODate(x.range_start)||!validISODate(x.range_end)||x.range_start>x.range_end||!safeString(x.note||"")||!finiteTime(x.created_at)||!safeString(x.claim_no,200)||!x.claim_no||(x.reimbursed_date!=null&&!validISODate(x.reimbursed_date))||!finiteTime(x.reimbursed_at,true))throw restoreError(stage,`Invalid batch '${x.id}'`,"batches",x.id);return {...x};});
+  out.batch_entries=data.batch_entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch entry record","batch_entries");unique("batch_entries",x.id);if(typeof x.batch_id!=="string"||typeof x.entry_id!=="string"||!Number.isSafeInteger(x.amount_minor_snapshot)||x.amount_minor_snapshot<0||!currencies.has(x.currency_snapshot)||(x.original_amount_minor!=null&&(!Number.isSafeInteger(x.original_amount_minor)||x.original_amount_minor<0))||(x.original_currency!=null&&!currencies.has(x.original_currency))||!safeString(x.vendor_snapshot)||!validISODate(x.date_snapshot)||!["pending","reimbursed","rejected"].includes(x.outcome)||!finiteTime(x.outcome_updated_at,true))throw restoreError(stage,`Invalid batch entry '${x.id}'`,"batch_entries",x.id);return {...x};});
+  out.edits=data.edits.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid edit record","edits");unique("edits",x.id);if(typeof x.entry_id!=="string"||!finiteTime(x.edited_at)||!isPlainObject(x.changes)||Object.keys(x.changes).some(k=>["__proto__","prototype","constructor"].includes(k))||!(x.reason==null||safeString(x.reason)))throw restoreError(stage,`Invalid edit '${x.id}'`,"edits",x.id);return {...x,changes:{...x.changes}};});
+  out.meta=data.meta.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid metadata record","meta");unique("meta",x.k);if(/^claimseq:/.test(x.k)&&(!Number.isSafeInteger(x.v)||x.v<0))throw restoreError(stage,`Invalid claim counter '${x.k}'`,"meta",x.k);try{structuredClone(x.v);}catch(e){throw restoreError(stage,`Unsupported metadata '${x.k}'`,"meta",x.k);}return {k:x.k,v:x.v};});
+  const total={value:0};out.proofs=data.proofs.map(x=>{if(!isPlainObject(x))throw restoreError("Validating receipts","Invalid proof record","proofs");unique("proofs",x.id);if(typeof x.entry_id!=="string"||!["image/jpeg","image/png","image/webp","application/pdf"].includes(x.file_type)||!safeString(x.name,500)||!finiteTime(x.added_at))throw restoreError("Validating receipts",`Invalid proof '${x.id}'`,"proofs",x.id);const bytes=strictBase64Bytes(x.data);if(bytes.length>MAX_ATTACHMENT)throw restoreError("Validating receipts",`Proof '${x.id}' exceeds 20 MiB`,"proofs",x.id);if(!bytesMatchType(bytes,x.file_type))throw restoreError("Validating receipts",`Proof '${x.id}' MIME type does not match its content`,"proofs",x.id);total.value+=bytes.length;if(total.value>MAX_ATTACHMENTS_TOTAL)throw restoreError("Validating receipts","Decoded attachments exceed the 250 MiB backup limit");return {id:x.id,entry_id:x.entry_id,file_type:x.file_type,name:x.name.replace(/[\\/\x00-\x1f]/g,"_"),added_at:x.added_at,blob:new Blob([bytes],{type:x.file_type})};});
+  for(const b of out.batches){b.reimburse_proof=canonicalDataURL(b.reimburse_proof,b.reimburse_proof_type,total);if(!b.reimburse_proof){delete b.reimburse_proof_type;}else b.reimburse_proof_type=b.reimburse_proof.slice(5,b.reimburse_proof.indexOf(";"));}
+  const ids=n=>seen[n];for(const e of out.entries)if(!ids("companies").has(e.company_id))throw restoreError(stage,`Entry '${e.id}' references a missing company`);for(const p of out.proofs)if(!ids("entries").has(p.entry_id))throw restoreError(stage,`Proof '${p.id}' references a missing entry`);for(const b of out.batches)if(!ids("companies").has(b.company_id))throw restoreError(stage,`Batch '${b.id}' references a missing company`);for(const e of out.edits)if(!ids("entries").has(e.entry_id))throw restoreError(stage,`Edit '${e.id}' references a missing entry`);
+  const batchById=new Map(out.batches.map(b=>[b.id,b])),entryById=new Map(out.entries.map(e=>[e.id,e])),active=new Map(),rejected=new Set(),claimNos=new Set();for(const b of out.batches){if(claimNos.has(b.claim_no))throw restoreError(stage,`Duplicate claim number '${b.claim_no}'`);claimNos.add(b.claim_no);}for(const be of out.batch_entries){const batch=batchById.get(be.batch_id),entry=entryById.get(be.entry_id);if(!batch||!entry)throw restoreError(stage,`Batch entry '${be.id}' has a broken reference`);if(batch.company_id!==entry.company_id)throw restoreError(stage,`Batch entry '${be.id}' crosses companies`);if(be.outcome==="rejected")rejected.add(be.entry_id);else{if(active.has(be.entry_id))throw restoreError(stage,`Entry '${be.entry_id}' belongs to more than one active claim`);active.set(be.entry_id,be);const expected=be.outcome==="pending"?"submitted":"reimbursed";if(entry.status!==expected)throw restoreError(stage,`Entry '${be.entry_id}' has an inconsistent claim status`);}}for(const id of rejected)if(!active.has(id)&&entryById.get(id).status!=="unclaimed")throw restoreError(stage,`Rejected entry '${id}' is not unclaimed`);
+  for(const m of out.meta){const z=m.k.match(/^claimseq:([^:]+):(\d{4})$/);if(z&&!ids("companies").has(z[1]))throw restoreError(stage,`Claim counter '${m.k}' references a missing company`);}
+  for(const b of out.batches){const m=b.claim_no.match(/-(\d{4})-(\d+)$/);if(!m)continue;const key=`claimseq:${b.company_id}:${m[1]}`;let rec=out.meta.find(x=>x.k===key);if(!rec){rec={k:key,v:0};out.meta.push(rec);seen.meta.add(key);}rec.v=Math.max(rec.v,+m[2]);}
+  return {stores:out,exportedAt:data.exported_at||null,attachmentBytes:total.value};
+}
+function deleteNamedDB(name){return new Promise((res,rej)=>{const r=indexedDB.deleteDatabase(name);r.onsuccess=()=>res();r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error(`Database '${name}' is blocked`));});}
+function createSchema(d){if(!d.objectStoreNames.contains("companies"))d.createObjectStore("companies",{keyPath:"id"});if(!d.objectStoreNames.contains("entries")){const s=d.createObjectStore("entries",{keyPath:"id"});s.createIndex("company_id","company_id");s.createIndex("status","status");s.createIndex("payment_date","payment_date");}if(!d.objectStoreNames.contains("tags"))d.createObjectStore("tags",{keyPath:"name"});if(!d.objectStoreNames.contains("proofs")){const s=d.createObjectStore("proofs",{keyPath:"id"});s.createIndex("entry_id","entry_id");}if(!d.objectStoreNames.contains("batches"))d.createObjectStore("batches",{keyPath:"id"});if(!d.objectStoreNames.contains("batch_entries")){const s=d.createObjectStore("batch_entries",{keyPath:"id"});s.createIndex("batch_id","batch_id");s.createIndex("entry_id","entry_id");}if(!d.objectStoreNames.contains("edits")){const s=d.createObjectStore("edits",{keyPath:"id"});s.createIndex("entry_id","entry_id");}if(!d.objectStoreNames.contains("meta"))d.createObjectStore("meta",{keyPath:"k"});}
+function openNamedDB(name){return new Promise((res,rej)=>{const r=indexedDB.open(name,1);r.onupgradeneeded=()=>createSchema(r.result);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error(`Database '${name}' is blocked`));});}
+function txComplete(t){return new Promise((res,rej)=>{t.oncomplete=res;t.onabort=()=>rej(t.error||new Error("Transaction aborted"));t.onerror=()=>{};});}
+async function readAllFromDB(db){const t=db.transaction(APP_STORES,"readonly"),out={};const ps=APP_STORES.map(n=>new Promise((res,rej)=>{const r=t.objectStore(n).getAll();r.onsuccess=()=>{out[n]=r.result;res();};r.onerror=()=>rej(r.error);}));await Promise.all(ps);await txComplete(t);return out;}
+async function writeAllToDB(db,stores,clear=true){const t=db.transaction(APP_STORES,"readwrite"),done=txComplete(t);try{for(const n of APP_STORES){const s=t.objectStore(n);if(clear)s.clear();for(const rec of stores[n])s.put(rec);}}catch(e){try{t.abort();}catch(_){}throw e;}await done;}
+function keyForStore(n,r){return n==="tags"?r.name:n==="meta"?r.k:r.id;}
+async function verifyNamedDB(name,expected){const db=await openNamedDB(name);try{const got=await readAllFromDB(db);compareStoreKeys(expected,got);return got;}finally{db.close();}}
+async function prepareNamedCopy(name,stores){await deleteNamedDB(name).catch(()=>{});const db=await openNamedDB(name);try{await writeAllToDB(db,stores,true);}finally{db.close();}await verifyNamedDB(name,stores);}
+async function snapshotActive(){return DB.runTransaction(APP_STORES,"readonly",async(s,t,req)=>{const out={};for(const n of APP_STORES)out[n]=await req(s[n].getAll());return out;});}
+async function replaceActiveAtomic(stores){return DB.runTransaction(APP_STORES,"readwrite",async(s,t,req)=>{for(const n of APP_STORES){await req(s[n].clear());auditFail(`restore-after-clear-${n}`);}for(const n of APP_STORES)for(const rec of stores[n]){await req(s[n].put(rec));auditFail(`restore-after-put-${n}`);}});}
+
 async function exportBackup(){
   toast("Preparing backup…");
   const proofsRaw=await DB.getAll("proofs");
@@ -1977,7 +2079,7 @@ async function exportBackup(){
   toast(`Backup saved · ${proofs.length} receipt${proofs.length!==1?"s":""} included`);
 }
 
-function importBackup(){
+function importBackupLegacy(){
   const inp=document.createElement("input");
   inp.type="file"; inp.accept="application/json,.json";
   inp.addEventListener("change",async()=>{
@@ -1997,35 +2099,41 @@ function importBackup(){
   inp.click();
 }
 
-async function doRestore(data){
-  closeSheet();
-  toast("Restoring…");
-  const stores=["companies","entries","tags","batches","batch_entries","edits","proofs","meta"];
-  for(const s of stores){
-    const all=await DB.getAll(s);
-    for(const rec of all){
-      const key = s==="tags"?rec.name : (s==="meta"?rec.k:rec.id);
-      await DB.del(s,key);
-    }
-  }
-  if(data.companies) await DB.bulkPut("companies",data.companies);
-  if(data.entries) await DB.bulkPut("entries",data.entries);
-  if(data.tags) await DB.bulkPut("tags",data.tags);
-  if(data.batches) await DB.bulkPut("batches",data.batches);
-  if(data.batch_entries) await DB.bulkPut("batch_entries",data.batch_entries);
-  if(data.edits) await DB.bulkPut("edits",data.edits);
-  if(data.meta) await DB.bulkPut("meta",data.meta);
-  if(Array.isArray(data.proofs)){
-    const recs=data.proofs.map(p=>({id:p.id,entry_id:p.entry_id,file_type:p.file_type,name:p.name,added_at:p.added_at,blob:base64ToBlob(p.data,p.file_type)}));
-    if(recs.length) await DB.bulkPut("proofs",recs);
-  }
-  await loadAll();
-  const now=Date.now();
-  await DB.put("meta",{k:"lastBackupAt",v:now});
-  state.lastBackupAt=now;
-  $$("#screens .screen").forEach(s=>closeScreen(s));
-  renderHome();
-  setTimeout(()=>toast("Backup restored"),350);
+function restoreStage(message){toast(message);const b=$("#impYes");if(b){b.disabled=true;b.textContent=message;}}
+function comparableRecord(n,r){if(n!=="proofs")return JSON.stringify(r);const {blob,...rest}=r;return JSON.stringify({...rest,_blobSize:blob instanceof Blob?blob.size:-1,_blobType:blob instanceof Blob?blob.type:""});}
+function compareStoreKeys(expected,actual){for(const n of APP_STORES){const a=new Map(expected[n].map(r=>[String(keyForStore(n,r)),comparableRecord(n,r)])),b=new Map(actual[n].map(r=>[String(keyForStore(n,r)),comparableRecord(n,r)]));if(a.size!==b.size)throw restoreError("Verifying restored data",`Verification failed for ${n}`);for(const [key,value] of a)if(b.get(key)!==value)throw restoreError("Verifying restored data",`Record '${key}' failed verification in ${n}`);}}
+async function recoverPreviousData(){
+  restoreStage("Restoring previous data…");const db=await openNamedDB(RESTORE_RECOVERY_DB);let old;try{old=await readAllFromDB(db);}finally{db.close();}
+  await replaceActiveAtomic(old);compareStoreKeys(old,await snapshotActive());await loadAll();await renderHome();localStorage.removeItem(RESTORE_MARKER);await deleteNamedDB(RESTORE_STAGE_DB).catch(()=>{});await deleteNamedDB(RESTORE_RECOVERY_DB).catch(()=>{});closeSheet();toast("Previous data restored");
+}
+function offerRecovery(message){
+  openSheet(`<h3>Restore could not be verified</h3><p class="hint" style="margin-bottom:14px;">${esc(message)} A verified recovery copy of your previous data is available.</p><button class="btn btn-danger" id="recoverOld">Restore previous data</button>`);
+  $("#recoverOld").addEventListener("click",async()=>{try{await recoverPreviousData();}catch(e){console.error(e);toast("Recovery failed — do not clear browser data");}});
+}
+function importBackup(){
+  const inp=document.createElement("input");inp.type="file";inp.accept="application/json,.json";
+  inp.addEventListener("change",async()=>{const f=inp.files&&inp.files[0];if(!f)return;let normalized;
+    try{toast("Reading backup…");const raw=JSON.parse(await f.text());toast("Validating records…");normalized=normalizeBackup(raw);toast("Validating receipts…");}
+    catch(e){console.error("Backup validation failed",e);toast(`${e.stage||"Reading backup"}: ${e.message}`);return;}
+    const s=normalized.stores,counts=`${s.entries.length} entries · ${s.companies.length} companies · ${s.proofs.length} receipts`;
+    openSheet(`<h3>Restore this validated backup?</h3><p class="hint" style="margin-bottom:14px;">This safely replaces current app data after creating an internal recovery copy:<br>${counts}.</p><button class="btn btn-danger" id="impYes">Replace &amp; restore</button><button class="btn btn-ghost" id="impNo" style="margin-top:10px;">Cancel</button>`);
+    $("#impYes").addEventListener("click",()=>doRestore(normalized));$("#impNo").addEventListener("click",closeSheet);
+  });inp.click();
+}
+async function doRestore(normalized){
+  const stores=normalized.stores;let committed=false;const unload=e=>{e.preventDefault();e.returnValue="";};window.addEventListener("beforeunload",unload);
+  try{
+    restoreStage("Preparing safe restore…");await prepareNamedCopy(RESTORE_STAGE_DB,stores);
+    const current=await snapshotActive();await prepareNamedCopy(RESTORE_RECOVERY_DB,current);
+    localStorage.setItem(RESTORE_MARKER,JSON.stringify({phase:"recovery-ready",createdAt:Date.now()}));
+    localStorage.setItem(RESTORE_MARKER,JSON.stringify({phase:"replacing-active",createdAt:Date.now()}));
+    restoreStage("Replacing database…");await replaceActiveAtomic(stores);committed=true;localStorage.setItem(RESTORE_MARKER,JSON.stringify({phase:"active-committed",createdAt:Date.now()}));
+    restoreStage("Verifying restored data…");compareStoreKeys(stores,await snapshotActive());
+    await loadAll();await renderHome();closeSheet();localStorage.removeItem(RESTORE_MARKER);
+    await deleteNamedDB(RESTORE_STAGE_DB).catch(()=>{});await deleteNamedDB(RESTORE_RECOVERY_DB).catch(()=>{});
+    $$("#screens .screen").forEach(s=>closeScreen(s));toast("Restore complete");
+  }catch(e){console.error("Restore failed",e);if(committed)offerRecovery(`${e.stage||"Restore"}: ${e.message}`);else toast(`${e.stage||"Restore"}: ${e.message}. Current data was not changed.`);}
+  finally{window.removeEventListener("beforeunload",unload);}
 }
 
 async function seedExamples(){
@@ -2320,6 +2428,13 @@ async function requestPersistentStorage(){
     await loadAll();
     await migrateClaimIds();
     await renderHome();
+    const pendingRestore=localStorage.getItem(RESTORE_MARKER);
+    if(pendingRestore){
+      setTimeout(()=>{openSheet(`<h3>Confirm restored data</h3><p class="hint" style="margin-bottom:14px;">Claims was interrupted during a restore. The restored data loaded successfully, and the previous data is still available as a recovery copy.</p><button class="btn btn-primary" id="keepRestored">Keep restored data</button><button class="btn btn-danger" id="bootRecover" style="margin-top:10px;">Restore previous data</button>`);
+        $("#keepRestored").addEventListener("click",async()=>{localStorage.removeItem(RESTORE_MARKER);await deleteNamedDB(RESTORE_STAGE_DB).catch(()=>{});await deleteNamedDB(RESTORE_RECOVERY_DB).catch(()=>{});closeSheet();toast("Restored data confirmed");});
+        $("#bootRecover").addEventListener("click",async()=>{try{await recoverPreviousData();}catch(e){console.error(e);toast("Recovery failed — do not clear browser data");}});
+      },450);
+    }
     if(state.companies.length===0){ setTimeout(()=>openCompanies(true),400); }
   }catch(err){
     document.body.innerHTML=`<div style="padding:40px;font-family:sans-serif;color:#16202b;">
