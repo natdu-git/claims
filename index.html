@@ -81,11 +81,11 @@
   .rline1 .amt-main{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:15.5px;color:var(--ink);white-space:nowrap;flex:none;letter-spacing:-.02em;}
   .amt-conv{color:var(--slate);font-weight:500;}
   .amt-need{color:var(--amber);font-weight:500;}
-  .rline2{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:4px;}
+  .rline2{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-top:4px;}
   .rline2 .meta{font-size:12.5px;color:var(--slate);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .rline2 .cur{font-size:10.5px;font-weight:600;letter-spacing:.04em;color:var(--slate);white-space:nowrap;flex:none;}
-  .row-status{text-align:right;min-width:0;flex:none;}
-  .claim-id-mini{display:block;max-width:132px;margin-top:1px;font-size:10px;font-weight:500;color:var(--slate);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .row-status{text-align:right;min-width:0;max-width:58%;flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .claim-id-inline{font-size:10px;font-weight:500;color:var(--slate);}
   .claim-id-warning{color:var(--danger);}
   .row .type-badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:4px;margin-right:6px;vertical-align:1px;}
   .type-travel{background:#e5f3f1;color:var(--jade-deep);}
@@ -661,7 +661,7 @@ function logRowHTML(e, noProof){
   const tags = (e.tags&&e.tags.length)
     ? `<div class="row-tags">${[...e.tags].sort((a,b)=>a.localeCompare(b)).slice(0,4).map(esc).join(", ")}${e.tags.length>4?`, +${e.tags.length-4}`:""}</div>` : "";
   const claimNo=state.activeClaimIds.get(e.id),claimWarning=state.activeClaimIntegrity.has(e.id);
-  const claimMeta=claimWarning?`<span class="claim-id-mini claim-id-warning" title="Multiple active claim memberships detected" aria-label="Warning: multiple active claim memberships">⚠ claim conflict</span>`:claimNo?`<span class="claim-id-mini mono" title="Active claim ${esc(claimNo)}" aria-label="Active claim ${esc(claimNo)}">${esc(claimNo)}</span>`:"";
+  const claimMeta=claimWarning?`<span class="claim-id-inline claim-id-warning" title="Multiple active claim memberships detected" aria-label="Warning: multiple active claim memberships"> · ⚠ claim conflict</span>`:claimNo?`<span class="claim-id-inline mono" title="Active claim ${esc(claimNo)}" aria-label="Active claim ${esc(claimNo)}"> · ${esc(claimNo)}</span>`:"";
   return `<div class="row" data-id="${e.id}">
       <div class="accent st-${e.status}"></div>
       ${showNoProof?`<span class="noproof-top">⚠ no proof</span>`:""}
