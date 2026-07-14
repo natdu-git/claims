@@ -549,8 +549,8 @@ async function loadAll(){
   let newest=0;
   state.entries.forEach(e=>{ newest=Math.max(newest, e.updated_at||0, e.created_at||0); });
   state.companies.forEach(c=>{ newest=Math.max(newest, c.created_at||0); });
-  (await DB.getAll("batches")).forEach(b=>{ newest=Math.max(newest, b.created_at||0, b.reimbursed_at||0); });
-  (await DB.getAll("batch_entries")).forEach(be=>{ newest=Math.max(newest, be.outcome_updated_at||0); });
+  (await DB.getAll("batches")).forEach(b=>{ newest=Math.max(newest, b.created_at||0, b.reimbursed_at||0, b.cancelled_at||0); });
+  (await DB.getAll("batch_entries")).forEach(be=>{ newest=Math.max(newest, be.outcome_updated_at||0, be.synced_at||0); });
   state.newestChange = newest;
   state.hasData = state.entries.length>0 || state.companies.length>0;
 }
@@ -1021,7 +1021,9 @@ async function saveEntry(isEdit){
     created_at:d._isNew?now:(state.entries.find(e=>e.id===d.id)?.created_at||now),
     updated_at:now,
   };
-  await DB.put("entries",rec);
+  if(isEdit){
+    await DB.runTransaction(["entries"],"readwrite",async(s,t,req)=>{const current=await req(s.entries.get(rec.id));if(!current)throw lifecycleError("This entry no longer exists");if(current.status!=="unclaimed")throw lifecycleError("This entry is in a claim — cancel or undo the claim to edit it");rec.status=current.status;rec.created_at=current.created_at||rec.created_at;await req(s.entries.put(rec));});
+  }else await DB.put("entries",rec);
 
   // proofs: delete removed existing, add new
   const existingProofs=await DB.getByIndex("proofs","entry_id",d.id);
@@ -1455,6 +1457,41 @@ async function renderClaim(){
 function validISODate(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v||""))return false;const d=new Date(v+"T00:00:00Z");return !isNaN(d)&&d.toISOString().slice(0,10)===v;}
 function claimError(message,entryId){const e=new Error(message);e.code="CLAIM_INVALID";e.entryId=entryId||null;return e;}
 function auditFail(step){if(window.__claimsTestFailAt===step)throw new Error(`Injected failure: ${step}`);}
+function snapshotFromEntry(e,company){
+  const thb=e.currency==="THB"?e.amount_minor:e.claim_thb_minor;
+  return {amount_minor_snapshot:thb,currency_snapshot:"THB",original_amount_minor:e.amount_minor,original_currency:e.currency,
+    company_id_snapshot:e.company_id,vendor_snapshot:e.vendor||company?.name||"",date_snapshot:e.payment_date,type_snapshot:e.type,
+    notes_snapshot:e.notes||"",tags_snapshot:[...(e.tags||[])],location_label_snapshot:e.location_label||"",
+    location_lat_snapshot:e.location_lat??null,location_lng_snapshot:e.location_lng??null};
+}
+function snapshotComparison(entry,be,company){
+  const current=snapshotFromEntry(entry,company),changed=[];
+  const eq=(a,b)=>Object.is(a,b),tags=v=>JSON.stringify([...(v||[])].sort((a,b)=>String(a).localeCompare(String(b))));
+  const checks=[
+    ["Claim amount",be.amount_minor_snapshot,current.amount_minor_snapshot,eq],
+    ["Claim currency",be.currency_snapshot,current.currency_snapshot,eq],
+    ["Original amount",be.original_amount_minor,current.original_amount_minor,eq],
+    ["Original currency",be.original_currency,current.original_currency,eq],
+    ["Company",be.company_id_snapshot??entry.company_id,current.company_id_snapshot,eq],
+    [entry.type==="travel"?"Location":"Vendor",be.vendor_snapshot,current.vendor_snapshot,eq],
+    ["Payment date",be.date_snapshot,current.date_snapshot,eq],
+    ["Type",be.type_snapshot,current.type_snapshot,eq],
+    ["Notes",be.notes_snapshot,current.notes_snapshot,eq],
+    ["Tags",be.tags_snapshot,current.tags_snapshot,(a,b)=>tags(a)===tags(b)],
+    ["Travel location",be.location_label_snapshot,current.location_label_snapshot,eq],
+    ["Travel latitude",be.location_lat_snapshot,current.location_lat_snapshot,eq],
+    ["Travel longitude",be.location_lng_snapshot,current.location_lng_snapshot,eq],
+  ];
+  for(const [label,oldValue,newValue,compare] of checks){if(oldValue!==undefined&&!compare(oldValue,newValue))changed.push(label);}
+  return {matches:changed.length===0,changedFields:changed,currentSnapshot:current};
+}
+function applyCurrentSnapshot(be,snapshot){for(const [k,v] of Object.entries(snapshot))be[k]=Array.isArray(v)?[...v]:v;}
+function batchAmounts(items){
+  const out={submitted:{},pending:{},reimbursed:{},rejected:{}};
+  for(const i of items){const c=i.currency_snapshot,v=i.amount_minor_snapshot;out.submitted[c]=(out.submitted[c]||0)+v;if(out[i.outcome])out[i.outcome][c]=(out[i.outcome][c]||0)+v;}
+  return out;
+}
+function amountLine(byCurrency){const keys=Object.keys(byCurrency);return keys.length?keys.map(c=>money(byCurrency[c],c)).join(" · "):money(0,"THB");}
 async function createClaimAtomic(input){
   const ids=[...input.entryIds];
   if(!ids.length)throw claimError("Choose at least one entry");
@@ -1479,9 +1516,10 @@ async function createClaimAtomic(input){
       if(e.currency!=="THB"&&(!Number.isSafeInteger(e.claim_thb_minor)||e.claim_thb_minor<=0))throw claimError("A foreign entry needs a positive THB claim amount",id);
       const memberships=await req(s.batch_entries.index("entry_id").getAll(IDBKeyRange.only(id)));
       for(const be of memberships){
-        if(be.outcome==="rejected")continue;
+        const membershipBatch=await req(s.batches.get(be.batch_id));
+        if(!membershipBatch)throw claimError("A selected entry has a broken claim reference",id);
+        if(membershipBatch.status==="cancelled"||be.outcome==="rejected")continue;
         if(be.outcome!=="pending"&&be.outcome!=="reimbursed")throw claimError("A selected entry has an invalid claim history",id);
-        if(!await req(s.batches.get(be.batch_id)))throw claimError("A selected entry has a broken claim reference",id);
         throw claimError("A selected entry already belongs to an active claim",id);
       }
       entries.push(e);
@@ -1496,8 +1534,8 @@ async function createClaimAtomic(input){
     if(batches.some(b=>b.claim_no===claimNo))throw claimError("That claim number already exists; refresh and try again");
     const batch={id:batchId,company_id:company.id,submitted_date:input.submittedDate,range_start:input.rangeStart,range_end:input.rangeEnd,note:"",created_at:now,claim_no:claimNo};
     await req(s.meta.put({k:seqKey,v:sequence}));auditFail("claim-after-counter");await req(s.batches.put(batch));auditFail("claim-after-batch");
-    for(const e of entries){const thb=e.currency==="THB"?e.amount_minor:e.claim_thb_minor;
-      await req(s.batch_entries.put({id:uid(),batch_id:batchId,entry_id:e.id,amount_minor_snapshot:thb,currency_snapshot:"THB",original_amount_minor:e.amount_minor,original_currency:e.currency,vendor_snapshot:e.vendor||company.name,date_snapshot:e.payment_date,outcome:"pending",outcome_updated_at:null}));auditFail("claim-after-batch-entry");
+    for(const e of entries){
+      await req(s.batch_entries.put({id:uid(),batch_id:batchId,entry_id:e.id,...snapshotFromEntry(e,company),outcome:"pending",outcome_updated_at:null}));auditFail("claim-after-batch-entry");
       await req(s.entries.put({...e,status:"submitted",updated_at:now}));auditFail("claim-after-entry");}
     return {batchId,claimNo,sequence,entryCount:entries.length};
   });
@@ -1507,7 +1545,7 @@ async function generateBatch(list,screen){
   const ids=[...claimState.selected];if(!ids.length)return;
   if(btn){btn.dataset.busy="1";btn.disabled=true;btn.textContent="Creating claim…";}
   try{const result=await createClaimAtomic({companyId:claimState.company,entryIds:ids,rangeStart:claimState.from,rangeEnd:claimState.to,submittedDate:todayISO()});
-    await loadAll();closeScreen(screen);claimState.selected=new Set();exportBatchCSV(result.batchId);toast(`Claim created · ${result.entryCount} items marked submitted`);setTimeout(()=>openBatchDetail(result.batchId),300);
+    await loadAll();claimState.selected=new Set();setTab("batches");toast(`Claim created · ${result.entryCount} items marked submitted`);setTimeout(()=>openBatchDetail(result.batchId),300);
   }catch(err){console.error("Claim creation failed",err);toast(err.message||"Claim creation failed — refresh and try again");if(btn){delete btn.dataset.busy;btn.disabled=false;btn.textContent=`Generate claim · ${ids.length} item${ids.length!==1?"s":""}`;}}
 }
 
@@ -1525,12 +1563,13 @@ async function openBatchesTab(){
   }else{
     body=batches.map(b=>{
       const items=byBatch[b.id]||[];
-      const tot={};items.forEach(i=>tot[i.currency_snapshot]=(tot[i.currency_snapshot]||0)+i.amount_minor_snapshot);
+      const amounts=batchAmounts(items);
       const pending=items.filter(i=>i.outcome==="pending").length;
       const reimbursed=items.filter(i=>i.outcome==="reimbursed").length;
       const rejected=items.filter(i=>i.outcome==="rejected").length;
       let statusTag,cls;
-      if(pending>0){statusTag="Outstanding";cls="st-submitted-c";}
+      if(b.status==="cancelled"){statusTag="Cancelled";cls="st-rejected-c";}
+      else if(pending>0){statusTag="Outstanding";cls="st-submitted-c";}
       else if(rejected>0&&reimbursed>0){statusTag="Partly reimbursed";cls="st-submitted-c";}
       else if(reimbursed>0){statusTag="Reimbursed";cls="st-reimbursed-c";}
       else{statusTag="Closed";cls="st-unclaimed-c";}
@@ -1538,7 +1577,8 @@ async function openBatchesTab(){
         <div class="bh"><span class="bt">${esc(companyName(b.company_id))}</span><span class="bd">${fmtDateShort(b.submitted_date)}</span></div>
         <div class="bd mono" style="margin-top:2px;font-weight:600;color:var(--ink-soft);">${esc(b.claim_no||"")}</div>
         <div class="bd" style="margin-top:3px;">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)} · ${items.length} item${items.length!==1?"s":""}</div>
-        <div style="margin-top:8px;font-family:var(--mono);font-weight:600;">${Object.keys(tot).map(c=>money(tot[c],c)).join("  ·  ")}</div>
+        <div style="margin-top:8px;font-family:var(--mono);font-weight:600;">${amountLine(amounts.submitted)}</div>
+        ${b.status==="cancelled"?`<div class="bd" style="margin-top:3px;">Cancelled ${fmtDateShort(new Date(b.cancelled_at).toISOString().slice(0,10))}</div>`:""}
         <div class="bstat"><span class="mini-tag ${cls}">${statusTag}</span>
           ${pending?`<span class="mini-tag st-submitted-c">${pending} pending</span>`:""}
           ${reimbursed?`<span class="mini-tag st-reimbursed-c">${reimbursed} paid</span>`:""}
@@ -1554,16 +1594,18 @@ async function openBatchesTab(){
 async function openBatchDetail(batchId){
   const batch=await DB.get("batches",batchId);if(!batch)return;
   const items=(await DB.getByIndex("batch_entries","batch_id",batchId));
-  const tot={};items.forEach(i=>tot[i.currency_snapshot]=(tot[i.currency_snapshot]||0)+i.amount_minor_snapshot);
+  const amounts=batchAmounts(items),isCancelled=batch.status==="cancelled";
 
+  const batchCompany=state.companies.find(c=>c.id===batch.company_id);
   const rows=items.map(be=>{
     const oc=be.outcome;
+    const live=state.entries.find(e=>e.id===be.entry_id),cmp=live?snapshotComparison(live,be,batchCompany):null;
     const ocClass={pending:"st-submitted-c",reimbursed:"st-reimbursed-c",rejected:"st-rejected-c"}[oc];
     const ocLabel={pending:"Pending",reimbursed:"Reimbursed",rejected:"Rejected → unclaimed"}[oc];
-    return `<div class="claim-row" data-be="${be.id}" data-entry="${be.entry_id}" style="cursor:pointer;">
+    return `<div class="claim-row" data-be="${be.id}" data-entry="${be.entry_id}" style="cursor:${isCancelled?"default":"pointer"};">
       <div class="info">
         <div class="t">${esc(be.vendor_snapshot)}</div>
-        <div class="s">${fmtDateShort(be.date_snapshot)} · <span class="mini-tag ${ocClass}">${ocLabel}</span></div>
+        <div class="s">${fmtDateShort(be.date_snapshot)} · <span class="mini-tag ${ocClass}">${ocLabel}</span>${cmp&&!cmp.matches?` · <span class="mini-tag st-rejected-c">Log changed: ${esc(cmp.changedFields.join(", "))}</span>`:""}</div>
       </div>
       <div class="a">${money(be.amount_minor_snapshot,be.currency_snapshot)}</div>
     </div>`;
@@ -1580,12 +1622,12 @@ async function openBatchDetail(batchId){
        <div class="hint" style="margin-bottom:6px;">Tap the slip to view full size.</div>` : "";
 
   let actionBtn="";
-  if(pendingCount>0){
+  if(!isCancelled&&pendingCount>0){
     actionBtn+=`<button class="btn btn-ghost" id="allPaid" style="margin-top:10px;">Mark all pending as reimbursed</button>`;
-  }else if(reimbursedCount>0){
+  }else if(!isCancelled&&reimbursedCount>0){
     actionBtn+=`<button class="btn btn-ghost" id="undoReimb" style="margin-top:10px;color:var(--danger);">Undo reimbursement</button>`;
   }
-  if(reimbursedCount===0){ // nothing paid yet → the whole claim can be cancelled
+  if(!isCancelled&&reimbursedCount===0){ // nothing paid yet → the whole claim can be cancelled
     actionBtn+=`<button class="btn btn-danger" id="cancelClaim" style="margin-top:10px;">Cancel claim (return items to Unclaimed)</button>`;
   }
 
@@ -1595,11 +1637,16 @@ async function openBatchDetail(batchId){
       <div class="r"><span class="k">Company</span><span class="v">${esc(companyName(batch.company_id))}</span></div>
       <div class="r"><span class="k">Submitted</span><span class="v">${fmtDate(batch.submitted_date)}</span></div>
       <div class="r"><span class="k">Date range</span><span class="v">${fmtDateShort(batch.range_start)} – ${fmtDateShort(batch.range_end)}</span></div>
-      <div class="r"><span class="k">Total claimed</span><span class="v mono">${Object.keys(tot).map(c=>money(tot[c],c)).join(" · ")}</span></div>
+      <div class="r"><span class="k">Status</span><span class="v">${isCancelled?"Cancelled":"Active"}</span></div>
+      ${isCancelled?`<div class="r"><span class="k">Cancelled</span><span class="v">${fmtDate(new Date(batch.cancelled_at).toISOString().slice(0,10))}</span></div>`:""}
+      <div class="r"><span class="k">Submitted total</span><span class="v mono">${amountLine(amounts.submitted)}</span></div>
+      <div class="r"><span class="k">Pending amount</span><span class="v mono">${amountLine(amounts.pending)}</span></div>
+      <div class="r"><span class="k">Reimbursed amount</span><span class="v mono">${amountLine(amounts.reimbursed)}</span></div>
+      <div class="r"><span class="k">Rejected amount</span><span class="v mono">${amountLine(amounts.rejected)}</span></div>
       ${reimbInfo}
     </div>
     ${slipBlock}
-    <div class="hint" style="margin-bottom:6px;">Tap an item to mark it reimbursed or rejected. Rejected items go back to Unclaimed for a future claim.</div>
+    <div class="hint" style="margin-bottom:6px;">${isCancelled?"This cancelled claim is retained as read-only history.":"Tap an item to mark it reimbursed or rejected. Rejected items go back to Unclaimed for a future claim."}</div>
     <div class="section-label">Items</div>
     ${rows}
     <button class="btn btn-primary" id="claimSheetBtn" style="margin-top:20px;">Claim sheet with photos (PDF)</button>
@@ -1607,7 +1654,7 @@ async function openBatchDetail(batchId){
     ${actionBtn}
   `;
   const sc=openScreen("Claim detail", body);
-  sc.querySelectorAll(".claim-row").forEach(r=>r.addEventListener("click",()=>itemOutcomeSheet(r.dataset.be,r.dataset.entry,batchId)));
+  if(!isCancelled)sc.querySelectorAll(".claim-row").forEach(r=>r.addEventListener("click",()=>itemOutcomeSheet(r.dataset.be,r.dataset.entry,batchId)));
   sc.querySelector("#claimSheetBtn").addEventListener("click",()=>exportClaimSheet(batchId));
   sc.querySelector("#csvBtn").addEventListener("click",()=>exportBatchCSV(batchId));
   const slipThumb=sc.querySelector("#rbSlipThumb"); if(slipThumb) slipThumb.addEventListener("click",()=>viewImage(batch.reimburse_proof));
@@ -1629,13 +1676,14 @@ function statusForOutcome(outcome){return outcome==="pending"?"submitted":outcom
 function clearBatchReimbursement(batch){delete batch.reimbursed_date;delete batch.reimbursed_at;delete batch.reimburse_proof;delete batch.reimburse_proof_type;}
 async function readBatchLifecycle(s,req,batchId){
   const batch=await req(s.batches.get(batchId));if(!batch)throw lifecycleError("This claim no longer exists");
+  if(batch.status==="cancelled")throw lifecycleError("This cancelled claim is read-only");
   const items=await req(s.batch_entries.index("batch_id").getAll(IDBKeyRange.only(batchId)));if(!items.length)throw lifecycleError("This claim has no items");
   const entries=new Map();
   for(const be of items){
     if(be.batch_id!==batchId||!statusForOutcome(be.outcome))throw lifecycleError("This claim contains an invalid item");
     const entry=await req(s.entries.get(be.entry_id));if(!entry)throw lifecycleError("A claim entry no longer exists");
     const memberships=await req(s.batch_entries.index("entry_id").getAll(IDBKeyRange.only(be.entry_id)));
-    const active=memberships.filter(x=>x.outcome==="pending"||x.outcome==="reimbursed");
+    const active=[];for(const x of memberships){const owner=await req(s.batches.get(x.batch_id));if(!owner)throw lifecycleError("An entry has a broken claim reference");if(owner.status!=="cancelled"&&(x.outcome==="pending"||x.outcome==="reimbursed"))active.push(x);}
     if(active.length>1)throw lifecycleError("An entry belongs to more than one active claim");
     if(be.outcome!=="rejected"){
       if(active.length!==1||active[0].id!==be.id||entry.status!==statusForOutcome(be.outcome))throw lifecycleError("A claim item and entry status disagree");
@@ -1646,10 +1694,12 @@ async function readBatchLifecycle(s,req,batchId){
   return {batch,items,entries};
 }
 async function markBatchReimbursedAtomic(batchId,date,slipUrl,slipType){
-  return DB.runTransaction(["batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
+  return DB.runTransaction(["companies","batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
     const {batch,items,entries}=await readBatchLifecycle(s,req,batchId),now=Date.now();
     if(!validISODate(date))throw lifecycleError("Choose a valid reimbursement date");
-    for(const be of items)if(be.outcome!=="pending"||entries.get(be.entry_id).status!=="submitted")throw lifecycleError("Every claim item must still be pending");
+    const company=await req(s.companies.get(batch.company_id));
+    const mismatched=[];for(const be of items){if(be.outcome!=="pending"||entries.get(be.entry_id).status!=="submitted")throw lifecycleError("Every claim item must still be pending");const cmp=snapshotComparison(entries.get(be.entry_id),be,company);if(!cmp.matches)mismatched.push(`${be.vendor_snapshot}: ${cmp.changedFields.join(", ")}`);}
+    if(mismatched.length)throw lifecycleError(`Claim items no longer match the Log: ${mismatched.join("; ")}. Review and synchronize them before reimbursement.`);
     let first=true;for(const be of items){be.outcome="reimbursed";be.outcome_updated_at=now;await req(s.batch_entries.put(be));if(first){auditFail("reimburse-after-first-item");first=false;}const entry=entries.get(be.entry_id);entry.status="reimbursed";entry.updated_at=now;await req(s.entries.put(entry));if(be===items[0])auditFail("reimburse-after-first-entry");}
     batch.reimbursed_date=date;batch.reimbursed_at=now;batch.reimburse_proof=slipUrl||null;batch.reimburse_proof_type=slipType||null;await req(s.batches.put(batch));auditFail("reimburse-after-batch-metadata");
   });
@@ -1665,8 +1715,9 @@ async function undoReimbursementAtomic(batchId){
   });
 }
 async function setItemOutcomeAtomic(beId,batchId,expectedOutcome,newOutcome){
-  return DB.runTransaction(["batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
+  return DB.runTransaction(["companies","batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
     const batch=await req(s.batches.get(batchId));if(!batch)throw lifecycleError("This claim no longer exists");
+    if(batch.status==="cancelled")throw lifecycleError("This cancelled claim is read-only");
     const be=await req(s.batch_entries.get(beId));if(!be||be.batch_id!==batchId)throw lifecycleError("This claim item no longer exists");
     if(be.outcome!==expectedOutcome)throw lifecycleError("This claim item changed — refresh and try again");
     if(!["pending","reimbursed","rejected"].includes(newOutcome)||newOutcome===be.outcome)throw lifecycleError("That item transition is no longer available");
@@ -1675,8 +1726,9 @@ async function setItemOutcomeAtomic(beId,batchId,expectedOutcome,newOutcome){
     const allowed=(be.outcome==="pending"&&["reimbursed","rejected"].includes(newOutcome))||(be.outcome==="reimbursed"&&["pending","rejected"].includes(newOutcome))||(be.outcome==="rejected"&&newOutcome==="pending");if(!allowed)throw lifecycleError("That item transition is not allowed");
     if(be.outcome==="rejected"){
       const memberships=await req(s.batch_entries.index("entry_id").getAll(IDBKeyRange.only(be.entry_id)));
-      if(memberships.some(x=>x.id!==be.id&&(x.outcome==="pending"||x.outcome==="reimbursed")))throw lifecycleError("This entry already belongs to another active claim");
+      for(const x of memberships){if(x.id===be.id)continue;const owner=await req(s.batches.get(x.batch_id));if(!owner)throw lifecycleError("This entry has a broken claim reference");if(owner.status!=="cancelled"&&(x.outcome==="pending"||x.outcome==="reimbursed"))throw lifecycleError("This entry already belongs to another active claim");}
     }
+    if(newOutcome==="reimbursed"){const company=await req(s.companies.get(batch.company_id)),cmp=snapshotComparison(entry,be,company);if(!cmp.matches)throw lifecycleError(`This claim item no longer matches the Log (${cmp.changedFields.join(", ")}). Review and synchronize it before reimbursement.`);}
     const now=Date.now();be.outcome=newOutcome;be.outcome_updated_at=now;await req(s.batch_entries.put(be));auditFail("item-outcome-after-batch-entry");entry.status=statusForOutcome(newOutcome);entry.updated_at=now;await req(s.entries.put(entry));auditFail("item-outcome-after-entry");
     if(newOutcome!=="reimbursed"&&(batch.reimbursed_date||batch.reimbursed_at||batch.reimburse_proof)){clearBatchReimbursement(batch);await req(s.batches.put(batch));}
   });
@@ -1686,8 +1738,20 @@ async function cancelClaimAtomic(batchId){
     const {batch,items,entries}=await readBatchLifecycle(s,req,batchId),now=Date.now();
     if(items.some(x=>x.outcome==="reimbursed"))throw lifecycleError("Undo reimbursement before cancelling this claim");
     if(items.some(x=>x.outcome!=="pending"&&x.outcome!=="rejected"))throw lifecycleError("This claim contains an invalid item");
-    for(let i=0;i<items.length;i++){const be=items[i],entry=entries.get(be.entry_id);if(be.outcome==="pending"){entry.status="unclaimed";entry.updated_at=now;await req(s.entries.put(entry));if(i===0)auditFail("cancel-after-first-entry");}else if(entry.status!=="unclaimed")throw lifecycleError("A rejected claim entry is active elsewhere");await req(s.batch_entries.delete(be.id));if(i===0)auditFail("cancel-after-first-item-delete");}
-    auditFail("cancel-before-batch-delete");await req(s.batches.delete(batch.id));auditFail("cancel-after-batch-delete");
+    for(let i=0;i<items.length;i++){const be=items[i],entry=entries.get(be.entry_id);if(be.outcome==="pending"){entry.status="unclaimed";entry.updated_at=now;await req(s.entries.put(entry));if(i===0)auditFail("cancel-after-first-entry-returned");}else if(entry.status!=="unclaimed")throw lifecycleError("A rejected claim entry is active elsewhere");}
+    batch.status="cancelled";batch.cancelled_at=now;clearBatchReimbursement(batch);await req(s.batches.put(batch));auditFail("cancel-after-batch-status");auditFail("cancel-before-commit");
+  });
+}
+async function synchronizeRejectedItemAtomic(beId,batchId,expectedChangedFields){
+  return DB.runTransaction(["companies","batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
+    const batch=await req(s.batches.get(batchId));if(!batch||batch.status==="cancelled")throw lifecycleError("This claim is no longer active");
+    const be=await req(s.batch_entries.get(beId));if(!be||be.batch_id!==batchId||be.outcome!=="rejected")throw lifecycleError("This rejected item changed — refresh and try again");
+    const entry=await req(s.entries.get(be.entry_id));if(!entry||entry.status!=="unclaimed")throw lifecycleError("The Log entry is no longer unclaimed");
+    const memberships=await req(s.batch_entries.index("entry_id").getAll(IDBKeyRange.only(be.entry_id)));for(const x of memberships){if(x.id===be.id)continue;const owner=await req(s.batches.get(x.batch_id));if(!owner)throw lifecycleError("This entry has a broken claim reference");if(owner.status!=="cancelled"&&(x.outcome==="pending"||x.outcome==="reimbursed"))throw lifecycleError("This entry already belongs to another active claim");}
+    if(entry.company_id!==batch.company_id)throw lifecycleError("The Log entry belongs to another company and cannot be synchronized into this claim");
+    const company=await req(s.companies.get(batch.company_id)),cmp=snapshotComparison(entry,be,company),expected=[...(expectedChangedFields||[])].sort().join("|");
+    if(cmp.changedFields.slice().sort().join("|")!==expected)throw lifecycleError("The Log entry changed again — review it and retry");
+    const now=Date.now();applyCurrentSnapshot(be,cmp.currentSnapshot);auditFail("sync-after-snapshot-replacement");be.outcome="pending";be.outcome_updated_at=now;be.synced_at=now;be.synced_fields=cmp.changedFields;await req(s.batch_entries.put(be));auditFail("sync-after-outcome-update");entry.status="submitted";entry.updated_at=now;await req(s.entries.put(entry));auditFail("sync-after-entry-status");
   });
 }
 async function deleteEntryAtomic(id){
@@ -1749,12 +1813,12 @@ function undoReimbursement(batchId,sc){
   });
 }
 
-// Cancel a claim that has NOT been reimbursed: return every item to Unclaimed and delete
-// the batch entirely. Only offered when no item is reimbursed.
+// Cancel a claim that has NOT been reimbursed: return active items to Unclaimed and retain
+// the batch and snapshots as read-only history. Only offered when no item is reimbursed.
 function cancelClaim(batchId,sc){
   openSheet(`<h3>Cancel this claim?</h3>
-    <p class="hint" style="margin-bottom:14px;">All items go back to <strong>Unclaimed</strong> and this claim is <strong>deleted</strong>. Nothing here has been reimbursed, so no payment record is lost. This can't be undone.</p>
-    <button class="btn btn-danger" id="cancelYes">Cancel claim &amp; delete</button>
+    <p class="hint" style="margin-bottom:14px;">Eligible items go back to <strong>Unclaimed</strong>. The claim and its number remain as read-only cancelled history. This can't be undone.</p>
+    <button class="btn btn-danger" id="cancelYes">Cancel claim</button>
     <button class="btn btn-ghost" id="cancelNo" style="margin-top:10px;">Keep claim</button>`);
   document.querySelector("#cancelNo").addEventListener("click",closeSheet);
   document.querySelector("#cancelYes").addEventListener("click",async()=>{
@@ -1779,7 +1843,16 @@ async function itemOutcomeSheet(beId,entryId,batchId){
     </div>`);
   $$("#sheet .list-choice button[data-o]").forEach(b=>b.addEventListener("click",async()=>{
     if(b.dataset.busy)return;b.dataset.busy="1";b.disabled=true;
-    try{await setItemOutcomeAtomic(beId,batchId,cur,b.dataset.o);await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Updated");}
+    try{
+      if(cur==="rejected"&&b.dataset.o==="pending"){
+        const [batch,be,entry]=await Promise.all([DB.get("batches",batchId),DB.get("batch_entries",beId),DB.get("entries",entryId)]);if(!batch||batch.status==="cancelled"||!be||be.outcome!=="rejected"||!entry||entry.status!=="unclaimed")throw lifecycleError("This item changed — refresh and try again");
+        const company=await DB.get("companies",batch.company_id),cmp=snapshotComparison(entry,be,company);
+        if(!cmp.matches){
+          openSheet(`<h3>Entry changed after rejection</h3><p class="hint">This entry has changed since it was added to the claim. Update the claim item to match the Log and reset it to pending?</p><div class="summary" style="margin:12px 0;">${cmp.changedFields.map(x=>`<div class="srow"><span class="k">Changed</span><span class="v">${esc(x)}</span></div>`).join("")}</div><button class="btn btn-primary" id="syncYes">Update &amp; reset to pending</button><button class="btn btn-ghost" id="syncNo" style="margin-top:10px;">Keep rejected</button>`);
+          document.querySelector("#syncNo").addEventListener("click",closeSheet);document.querySelector("#syncYes").addEventListener("click",async()=>{const yes=document.querySelector("#syncYes");if(yes.dataset.busy)return;yes.dataset.busy="1";yes.disabled=true;try{await synchronizeRejectedItemAtomic(beId,batchId,cmp.changedFields);await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Claim item synchronized and reset");}catch(e){console.error("Item synchronization failed",e);toast(e.message||"Item could not be synchronized");delete yes.dataset.busy;yes.disabled=false;}});return;
+        }
+      }
+      await setItemOutcomeAtomic(beId,batchId,cur,b.dataset.o);await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Updated");}
     catch(e){console.error("Item outcome update failed",e);toast(e.message||"Item could not be updated");delete b.dataset.busy;b.disabled=false;}
   }));
 }
@@ -1818,15 +1891,16 @@ async function exportClaimSheet(batchId){
     let proofHTML=imgs.map(p=>{const u=URL.createObjectURL(p.blob);urls.push(u);return `<img src="${u}">`;}).join("");
     if(pdfs.length) proofHTML+=`<div class="ppdf">${pdfs.length} PDF proof${pdfs.length>1?"s":""} attached (not shown)</div>`;
     if(imgs.length===0 && pdfs.length===0) proofHTML=`<div class="pproof-empty"></div>`;
-    const type=live?live.type[0].toUpperCase()+live.type.slice(1):"";
+    const snapshotType=be.type_snapshot??live?.type,type=snapshotType?snapshotType[0].toUpperCase()+snapshotType.slice(1):"";
+    const snapshotTags=be.tags_snapshot??live?.tags??[],snapshotNotes=be.notes_snapshot??live?.notes??"";
     const rows=[
       ["Company",esc(companyName(batch.company_id))],
       type?["Type",type]:null,
       ["Vendor",esc(be.vendor_snapshot)],
       ["Date",fmtDate(be.date_snapshot)],
       (be.original_currency && be.original_currency!==be.currency_snapshot)?["Original",money(be.original_amount_minor,be.original_currency)]:null,
-      (live&&live.tags&&live.tags.length)?["Tags",esc(live.tags.join(", "))]:null,
-      (live&&live.notes)?["Notes",esc(live.notes)]:null,
+      snapshotTags.length?["Tags",esc(snapshotTags.join(", "))]:null,
+      snapshotNotes?["Notes",esc(snapshotNotes)]:null,
     ].filter(Boolean).map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
     const ocLabel={pending:"Pending",reimbursed:"Reimbursed",rejected:"Rejected"}[be.outcome]||"";
     entriesHTML+=`<div class="pitem">
@@ -2085,14 +2159,14 @@ function normalizeBackup(data){
   out.companies=data.companies.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid company record","companies");unique("companies",x.id);if(!safeString(x.name,500)||!x.name.trim()||!currencies.has(x.default_currency)||typeof x.archived!=="boolean"||!finiteTime(x.created_at)||!/^#[0-9a-f]{6}$/i.test(x.color||"")||!/^[A-Z0-9]{1,6}$/.test(x.code||""))throw restoreError(stage,`Invalid company '${x.id}'`,"companies",x.id);return {...x,name:x.name.trim(),code:x.code.toUpperCase()};});
   out.entries=data.entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid entry record","entries");unique("entries",x.id);if(typeof x.company_id!=="string"||!["expense","travel"].includes(x.type)||!Number.isSafeInteger(x.amount_minor)||x.amount_minor<0||!currencies.has(x.currency)||(x.claim_thb_minor!=null&&(!Number.isSafeInteger(x.claim_thb_minor)||x.claim_thb_minor<0))||!validISODate(x.payment_date)||!["unclaimed","submitted","reimbursed"].includes(x.status)||!safeString(x.vendor)||!safeString(x.notes)||!safeString(x.location_label||"")||!Array.isArray(x.tags)||x.tags.some(t=>!safeString(t,500))||!(x.location_lat==null&&x.location_lng==null)&&!(Number.isFinite(x.location_lat)&&x.location_lat>=-90&&x.location_lat<=90&&Number.isFinite(x.location_lng)&&x.location_lng>=-180&&x.location_lng<=180)||!finiteTime(x.created_at)||!finiteTime(x.updated_at,true))throw restoreError(stage,`Invalid entry '${x.id}'`,"entries",x.id);return {...x,tags:[...x.tags]};});
   out.tags=data.tags.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid tag record","tags");unique("tags",x.name);if(!safeString(x.name,500)||!x.name.trim()||!finiteTime(x.created_at,true))throw restoreError(stage,`Invalid tag '${x.name}'`,"tags",x.name);return {...x};});
-  out.batches=data.batches.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch record","batches");unique("batches",x.id);if(typeof x.company_id!=="string"||!validISODate(x.submitted_date)||!validISODate(x.range_start)||!validISODate(x.range_end)||x.range_start>x.range_end||!safeString(x.note||"")||!finiteTime(x.created_at)||!safeString(x.claim_no,200)||!x.claim_no||(x.reimbursed_date!=null&&!validISODate(x.reimbursed_date))||!finiteTime(x.reimbursed_at,true))throw restoreError(stage,`Invalid batch '${x.id}'`,"batches",x.id);return {...x};});
-  out.batch_entries=data.batch_entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch entry record","batch_entries");unique("batch_entries",x.id);if(typeof x.batch_id!=="string"||typeof x.entry_id!=="string"||!Number.isSafeInteger(x.amount_minor_snapshot)||x.amount_minor_snapshot<0||!currencies.has(x.currency_snapshot)||(x.original_amount_minor!=null&&(!Number.isSafeInteger(x.original_amount_minor)||x.original_amount_minor<0))||(x.original_currency!=null&&!currencies.has(x.original_currency))||!safeString(x.vendor_snapshot)||!validISODate(x.date_snapshot)||!["pending","reimbursed","rejected"].includes(x.outcome)||!finiteTime(x.outcome_updated_at,true))throw restoreError(stage,`Invalid batch entry '${x.id}'`,"batch_entries",x.id);return {...x};});
+  out.batches=data.batches.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch record","batches");unique("batches",x.id);if(typeof x.company_id!=="string"||!validISODate(x.submitted_date)||!validISODate(x.range_start)||!validISODate(x.range_end)||x.range_start>x.range_end||!safeString(x.note||"")||!finiteTime(x.created_at)||!safeString(x.claim_no,200)||!x.claim_no||(x.status!=null&&x.status!=="cancelled")||(x.status==="cancelled"&&!finiteTime(x.cancelled_at))||(x.status!=="cancelled"&&x.cancelled_at!=null)||(x.reimbursed_date!=null&&!validISODate(x.reimbursed_date))||!finiteTime(x.reimbursed_at,true))throw restoreError(stage,`Invalid batch '${x.id}'`,"batches",x.id);return {...x};});
+  out.batch_entries=data.batch_entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch entry record","batch_entries");unique("batch_entries",x.id);if(typeof x.batch_id!=="string"||typeof x.entry_id!=="string"||!Number.isSafeInteger(x.amount_minor_snapshot)||x.amount_minor_snapshot<0||!currencies.has(x.currency_snapshot)||(x.original_amount_minor!=null&&(!Number.isSafeInteger(x.original_amount_minor)||x.original_amount_minor<0))||(x.original_currency!=null&&!currencies.has(x.original_currency))||!safeString(x.vendor_snapshot)||!validISODate(x.date_snapshot)||!["pending","reimbursed","rejected"].includes(x.outcome)||!finiteTime(x.outcome_updated_at,true)||!finiteTime(x.synced_at,true)||(x.synced_fields!=null&&(!Array.isArray(x.synced_fields)||x.synced_fields.some(v=>!safeString(v,200))))||(x.company_id_snapshot!=null&&typeof x.company_id_snapshot!=="string")||(x.type_snapshot!=null&&!["expense","travel"].includes(x.type_snapshot))||(x.notes_snapshot!=null&&!safeString(x.notes_snapshot))||(x.tags_snapshot!=null&&(!Array.isArray(x.tags_snapshot)||x.tags_snapshot.some(v=>!safeString(v,500))))||(x.location_label_snapshot!=null&&!safeString(x.location_label_snapshot))||!((x.location_lat_snapshot==null&&x.location_lng_snapshot==null)||(Number.isFinite(x.location_lat_snapshot)&&x.location_lat_snapshot>=-90&&x.location_lat_snapshot<=90&&Number.isFinite(x.location_lng_snapshot)&&x.location_lng_snapshot>=-180&&x.location_lng_snapshot<=180)))throw restoreError(stage,`Invalid batch entry '${x.id}'`,"batch_entries",x.id);return {...x,...(x.tags_snapshot?{tags_snapshot:[...x.tags_snapshot]}:{})};});
   out.edits=data.edits.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid edit record","edits");unique("edits",x.id);if(typeof x.entry_id!=="string"||!finiteTime(x.edited_at)||!isPlainObject(x.changes)||Object.keys(x.changes).some(k=>["__proto__","prototype","constructor"].includes(k))||!(x.reason==null||safeString(x.reason)))throw restoreError(stage,`Invalid edit '${x.id}'`,"edits",x.id);return {...x,changes:{...x.changes}};});
   out.meta=data.meta.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid metadata record","meta");unique("meta",x.k);if(/^claimseq:/.test(x.k)&&(!Number.isSafeInteger(x.v)||x.v<0))throw restoreError(stage,`Invalid claim counter '${x.k}'`,"meta",x.k);try{structuredClone(x.v);}catch(e){throw restoreError(stage,`Unsupported metadata '${x.k}'`,"meta",x.k);}return {k:x.k,v:x.v};});
   const total={value:0};out.proofs=data.proofs.map(x=>{if(!isPlainObject(x))throw restoreError("Validating receipts","Invalid proof record","proofs");unique("proofs",x.id);if(typeof x.entry_id!=="string"||!["image/jpeg","image/png","image/webp","application/pdf"].includes(x.file_type)||!safeString(x.name,500)||!finiteTime(x.added_at))throw restoreError("Validating receipts",`Invalid proof '${x.id}'`,"proofs",x.id);const bytes=strictBase64Bytes(x.data);if(bytes.length>MAX_ATTACHMENT)throw restoreError("Validating receipts",`Proof '${x.id}' exceeds 20 MiB`,"proofs",x.id);if(!bytesMatchType(bytes,x.file_type))throw restoreError("Validating receipts",`Proof '${x.id}' MIME type does not match its content`,"proofs",x.id);total.value+=bytes.length;if(total.value>MAX_ATTACHMENTS_TOTAL)throw restoreError("Validating receipts","Decoded attachments exceed the 250 MiB backup limit");return {id:x.id,entry_id:x.entry_id,file_type:x.file_type,name:x.name.replace(/[\\/\x00-\x1f]/g,"_"),added_at:x.added_at,blob:new Blob([bytes],{type:x.file_type})};});
   for(const b of out.batches){b.reimburse_proof=canonicalDataURL(b.reimburse_proof,b.reimburse_proof_type,total);if(!b.reimburse_proof){delete b.reimburse_proof_type;}else b.reimburse_proof_type=b.reimburse_proof.slice(5,b.reimburse_proof.indexOf(";"));}
   const ids=n=>seen[n];for(const e of out.entries)if(!ids("companies").has(e.company_id))throw restoreError(stage,`Entry '${e.id}' references a missing company`);for(const p of out.proofs)if(!ids("entries").has(p.entry_id))throw restoreError(stage,`Proof '${p.id}' references a missing entry`);for(const b of out.batches)if(!ids("companies").has(b.company_id))throw restoreError(stage,`Batch '${b.id}' references a missing company`);for(const e of out.edits)if(!ids("entries").has(e.entry_id))throw restoreError(stage,`Edit '${e.id}' references a missing entry`);
-  const batchById=new Map(out.batches.map(b=>[b.id,b])),entryById=new Map(out.entries.map(e=>[e.id,e])),active=new Map(),rejected=new Set(),claimNos=new Set();for(const b of out.batches){if(claimNos.has(b.claim_no))throw restoreError(stage,`Duplicate claim number '${b.claim_no}'`);claimNos.add(b.claim_no);}for(const be of out.batch_entries){const batch=batchById.get(be.batch_id),entry=entryById.get(be.entry_id);if(!batch||!entry)throw restoreError(stage,`Batch entry '${be.id}' has a broken reference`);if(batch.company_id!==entry.company_id)throw restoreError(stage,`Batch entry '${be.id}' crosses companies`);if(be.outcome==="rejected")rejected.add(be.entry_id);else{if(active.has(be.entry_id))throw restoreError(stage,`Entry '${be.entry_id}' belongs to more than one active claim`);active.set(be.entry_id,be);const expected=be.outcome==="pending"?"submitted":"reimbursed";if(entry.status!==expected)throw restoreError(stage,`Entry '${be.entry_id}' has an inconsistent claim status`);}}for(const id of rejected)if(!active.has(id)&&entryById.get(id).status!=="unclaimed")throw restoreError(stage,`Rejected entry '${id}' is not unclaimed`);
+  const batchById=new Map(out.batches.map(b=>[b.id,b])),entryById=new Map(out.entries.map(e=>[e.id,e])),active=new Map(),rejected=new Set(),claimNos=new Set();for(const b of out.batches){if(claimNos.has(b.claim_no))throw restoreError(stage,`Duplicate claim number '${b.claim_no}'`);claimNos.add(b.claim_no);}for(const be of out.batch_entries){const batch=batchById.get(be.batch_id),entry=entryById.get(be.entry_id);if(!batch||!entry)throw restoreError(stage,`Batch entry '${be.id}' has a broken reference`);if(be.company_id_snapshot!=null&&batch.company_id!==be.company_id_snapshot)throw restoreError(stage,`Batch entry '${be.id}' has an inconsistent company snapshot`);if(batch.status==="cancelled")continue;if(be.outcome==="rejected")rejected.add(be.entry_id);else{if(active.has(be.entry_id))throw restoreError(stage,`Entry '${be.entry_id}' belongs to more than one active claim`);active.set(be.entry_id,be);const expected=be.outcome==="pending"?"submitted":"reimbursed";if(entry.status!==expected)throw restoreError(stage,`Entry '${be.entry_id}' has an inconsistent claim status`);}}for(const id of rejected)if(!active.has(id)&&entryById.get(id).status!=="unclaimed")throw restoreError(stage,`Rejected entry '${id}' is not unclaimed`);
   for(const m of out.meta){const z=m.k.match(/^claimseq:([^:]+):(\d{4})$/);if(z&&!ids("companies").has(z[1]))throw restoreError(stage,`Claim counter '${m.k}' references a missing company`);}
   for(const b of out.batches){const m=b.claim_no.match(/-(\d{4})-(\d+)$/);if(!m)continue;const key=`claimseq:${b.company_id}:${m[1]}`;let rec=out.meta.find(x=>x.k===key);if(!rec){rec={k:key,v:0};out.meta.push(rec);seen.meta.add(key);}rec.v=Math.max(rec.v,+m[2]);}
   return {stores:out,exportedAt:data.exported_at||null,attachmentBytes:total.value};
