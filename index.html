@@ -84,6 +84,9 @@
   .rline2{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:4px;}
   .rline2 .meta{font-size:12.5px;color:var(--slate);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .rline2 .cur{font-size:10.5px;font-weight:600;letter-spacing:.04em;color:var(--slate);white-space:nowrap;flex:none;}
+  .row-status{text-align:right;min-width:0;flex:none;}
+  .claim-id-mini{display:block;max-width:132px;margin-top:1px;font-size:10px;font-weight:500;color:var(--slate);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .claim-id-warning{color:var(--danger);}
   .row .type-badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:4px;margin-right:6px;vertical-align:1px;}
   .type-travel{background:#e5f3f1;color:var(--jade-deep);}
   .type-expense{background:#eef0f2;color:var(--ink-soft);}
@@ -194,6 +197,9 @@
   .btn-primary{background:var(--jade);color:#fff;}
   .btn-primary:active{background:var(--jade-deep);}
   .btn-primary:disabled{background:#a9c4c0;}
+  .btn-positive{background:var(--green);color:#fff;border:1.5px solid var(--green);}
+  .btn-positive:active{filter:brightness(.9);}
+  .btn-positive:disabled{background:#aeb9a7;color:#f5f5f2;border-color:#aeb9a7;cursor:default;}
   .btn-ghost{background:var(--surface);color:var(--jade);border:1.5px solid var(--line);}
   .btn-danger{background:#fdecec;color:var(--danger);border:1.5px solid #f3cccc;}
   .btn-sm{padding:9px 13px;font-size:13.5px;border-radius:10px;}
@@ -227,6 +233,7 @@
   .psummary{max-width:380px;margin-bottom:18px;font-size:13px;}
   .pitem{display:flex;gap:14px;align-items:stretch;border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:14px;}
   .pcard{flex:0 0 46%;max-width:46%;}
+  .pitem-no{font-size:13px;font-weight:700;color:#555;margin-bottom:5px;}
   .pcard .pamt{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
   .pcard .pcur{font-size:12px;color:#666;margin-top:1px;}
   .pcard .pstatus{display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:999px;background:#f0ede6;color:#7a3b22;margin:6px 0 10px;}
@@ -302,6 +309,8 @@
   .batch-card .bh .bt{font-weight:700;}
   .batch-card .bh .bd{font-size:12.5px;color:var(--slate);}
   .batch-card .bstat{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;}
+  .batch-card.cancelled{background:#ebeae6;border-color:#d8d5cd;color:var(--ink-soft);}
+  .batch-section-title{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);margin:8px 2px 10px;}
   .mini-tag{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;}
   .row-tags{font-size:11px;color:var(--slate);margin-top:2px;line-height:1.3;}
   .tp-list{display:flex;flex-direction:column;gap:0;max-height:44vh;overflow-y:auto;border:1px solid var(--line);border-radius:12px;margin-top:8px;}
@@ -529,6 +538,8 @@ const state = {
   entries:[],
   filter:{company:null, status:null, from:null, to:null, q:""},
   defaultCurrency:"THB",
+  activeClaimIds:new Map(),
+  activeClaimIntegrity:new Set(),
 };
 
 async function loadAll(){
@@ -545,12 +556,15 @@ async function loadAll(){
   state.claimantName = cn?.v || "";
   const lb = await DB.get("meta","lastBackupAt");
   state.lastBackupAt = lb?.v || 0;
+  const batches=await DB.getAll("batches"),batchEntries=await DB.getAll("batch_entries"),batchById=new Map(batches.map(b=>[b.id,b])),activeClaims=new Map(),integrity=new Set();
+  for(const be of batchEntries){const batch=batchById.get(be.batch_id);if(!batch||batch.status==="cancelled"||!(be.outcome==="pending"||be.outcome==="reimbursed"))continue;if(activeClaims.has(be.entry_id)){activeClaims.delete(be.entry_id);integrity.add(be.entry_id);console.error("Entry belongs to more than one active claim",be.entry_id);}else if(!integrity.has(be.entry_id))activeClaims.set(be.entry_id,batch.claim_no||"Claim");}
+  state.activeClaimIds=activeClaims;state.activeClaimIntegrity=integrity;
   // Work out whether anything changed since the last backup (for the reminder banner).
   let newest=0;
   state.entries.forEach(e=>{ newest=Math.max(newest, e.updated_at||0, e.created_at||0); });
   state.companies.forEach(c=>{ newest=Math.max(newest, c.created_at||0); });
-  (await DB.getAll("batches")).forEach(b=>{ newest=Math.max(newest, b.created_at||0, b.reimbursed_at||0, b.cancelled_at||0); });
-  (await DB.getAll("batch_entries")).forEach(be=>{ newest=Math.max(newest, be.outcome_updated_at||0, be.synced_at||0); });
+  batches.forEach(b=>{ newest=Math.max(newest, b.created_at||0, b.reimbursed_at||0, b.cancelled_at||0); });
+  batchEntries.forEach(be=>{ newest=Math.max(newest, be.outcome_updated_at||0, be.synced_at||0); });
   state.newestChange = newest;
   state.hasData = state.entries.length>0 || state.companies.length>0;
 }
@@ -646,6 +660,8 @@ function logRowHTML(e, noProof){
     : `${e.currency} · <span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`;
   const tags = (e.tags&&e.tags.length)
     ? `<div class="row-tags">${[...e.tags].sort((a,b)=>a.localeCompare(b)).slice(0,4).map(esc).join(", ")}${e.tags.length>4?`, +${e.tags.length-4}`:""}</div>` : "";
+  const claimNo=state.activeClaimIds.get(e.id),claimWarning=state.activeClaimIntegrity.has(e.id);
+  const claimMeta=claimWarning?`<span class="claim-id-mini claim-id-warning" title="Multiple active claim memberships detected" aria-label="Warning: multiple active claim memberships">⚠ claim conflict</span>`:claimNo?`<span class="claim-id-mini mono" title="Active claim ${esc(claimNo)}" aria-label="Active claim ${esc(claimNo)}">${esc(claimNo)}</span>`:"";
   return `<div class="row" data-id="${e.id}">
       <div class="accent st-${e.status}"></div>
       ${showNoProof?`<span class="noproof-top">⚠ no proof</span>`:""}
@@ -656,7 +672,7 @@ function logRowHTML(e, noProof){
         </div>
         <div class="rline2">
           <div class="meta"><span class="type-badge type-${e.type}">${e.type}</span><span class="co-dot" style="background:${companyColor(e.company_id)}"></span>${esc(companyName(e.company_id))}</div>
-          <div class="cur">${curLine}</div>
+          <div class="cur row-status">${curLine}${claimMeta}</div>
         </div>
         ${tags}
       </div>
@@ -1001,6 +1017,7 @@ function showSummary(formScreen){
 async function saveEntry(isEdit){
   const d=draft;
   const now=Date.now();
+  const editBase=isEdit?state.entries.find(e=>e.id===d.id):null;
   let changes=null;
   if(isEdit){
     const before=state.entries.find(e=>e.id===d.id);
@@ -1022,7 +1039,7 @@ async function saveEntry(isEdit){
     updated_at:now,
   };
   if(isEdit){
-    await DB.runTransaction(["entries"],"readwrite",async(s,t,req)=>{const current=await req(s.entries.get(rec.id));if(!current)throw lifecycleError("This entry no longer exists");if(current.status!=="unclaimed")throw lifecycleError("This entry is in a claim — cancel or undo the claim to edit it");rec.status=current.status;rec.created_at=current.created_at||rec.created_at;await req(s.entries.put(rec));});
+    await DB.runTransaction(["entries"],"readwrite",async(s,t,req)=>{const current=await req(s.entries.get(rec.id));if(!current)throw lifecycleError("This entry no longer exists");if(current.status!=="unclaimed")throw lifecycleError("This entry is in a claim — cancel or undo the claim to edit it");if(current.updated_at!==(editBase?.updated_at??current.updated_at))throw lifecycleError("This entry changed in another tab — reopen it and try again");rec.status=current.status;rec.created_at=current.created_at||rec.created_at;await req(s.entries.put(rec));});
   }else await DB.put("entries",rec);
 
   // proofs: delete removed existing, add new
@@ -1273,7 +1290,11 @@ async function openDetail(id){
   const proofs=await DB.getByIndex("proofs","entry_id",id);
   const edits=(await DB.getByIndex("edits","entry_id",id)).sort((a,b)=>b.edited_at-a.edited_at);
   const bes=await DB.getByIndex("batch_entries","entry_id",id);
-  const activeBe=bes.find(b=>b.outcome!=="rejected");
+  const batchById=new Map((await DB.getAll("batches")).map(b=>[b.id,b]));
+  const activeMemberships=bes.filter(be=>{const batch=batchById.get(be.batch_id);return !!batch&&batch.status!=="cancelled"&&(be.outcome==="pending"||be.outcome==="reimbursed");});
+  const activeBe=activeMemberships.length===1?activeMemberships[0]:null;
+  const membershipConflict=activeMemberships.length>1;
+  if(membershipConflict)console.error("Entry belongs to more than one active claim",id,activeMemberships.map(be=>be.batch_id));
 
   const kv=[
     ["Company",companyName(e.company_id)],
@@ -1312,6 +1333,7 @@ async function openDetail(id){
     <button class="btn btn-ghost" id="dupBtn" style="margin-top:10px;">Duplicate as new entry</button>
     ${activeBe?`<div class="hint" style="margin-top:16px;">This entry can’t be edited or deleted while it belongs to this claim. Cancel the claim or undo reimbursement first, or use Duplicate as new entry.</div>
     <button class="btn btn-ghost" id="goClaimBtn" style="margin-top:10px;">View claim</button>`:""}
+    ${membershipConflict?`<div class="warn" style="margin-top:16px;">⚠ This entry has multiple active claim memberships. No claim link is shown until the integrity issue is resolved.</div>`:""}
 
     ${e.status==="unclaimed"?`<button class="btn btn-danger" id="delBtn" style="margin-top:10px;">Delete entry</button>`:""}
 
@@ -1486,6 +1508,7 @@ function snapshotComparison(entry,be,company){
   return {matches:changed.length===0,changedFields:changed,currentSnapshot:current};
 }
 function applyCurrentSnapshot(be,snapshot){for(const [k,v] of Object.entries(snapshot))be[k]=Array.isArray(v)?[...v]:v;}
+function snapshotToken(snapshot){const x={...snapshot,tags_snapshot:[...(snapshot.tags_snapshot||[])].sort((a,b)=>String(a).localeCompare(String(b)))};return JSON.stringify(x);}
 function batchAmounts(items){
   const out={submitted:{},pending:{},reimbursed:{},rejected:{}};
   for(const i of items){const c=i.currency_snapshot,v=i.amount_minor_snapshot;out.submitted[c]=(out.submitted[c]||0)+v;if(out[i.outcome])out[i.outcome][c]=(out[i.outcome][c]||0)+v;}
@@ -1552,42 +1575,46 @@ async function generateBatch(list,screen){
 /* ============================================================
    BATCHES + reimbursement
    ============================================================ */
+let showCancelledClaims=false;
 async function openBatchesTab(){
   const batches=(await DB.getAll("batches")).sort((a,b)=>b.created_at-a.created_at);
   const bes=await DB.getAll("batch_entries");
   const byBatch={};bes.forEach(be=>{(byBatch[be.batch_id]=byBatch[be.batch_id]||[]).push(be);});
 
+  const active=batches.filter(b=>b.status!=="cancelled"),cancelled=batches.filter(b=>b.status==="cancelled");
+  const cards=list=>list.map(b=>{
+    const items=byBatch[b.id]||[];
+    const amounts=batchAmounts(items);
+    const pending=items.filter(i=>i.outcome==="pending").length;
+    const reimbursed=items.filter(i=>i.outcome==="reimbursed").length;
+    const rejected=items.filter(i=>i.outcome==="rejected").length;
+    let statusTag,cls;
+    if(b.status==="cancelled"){statusTag="Cancelled";cls="st-unclaimed-c";}
+    else if(pending>0){statusTag="Outstanding";cls="st-submitted-c";}
+    else if(rejected>0&&reimbursed>0){statusTag="Partly reimbursed";cls="st-submitted-c";}
+    else if(reimbursed>0){statusTag="Reimbursed";cls="st-reimbursed-c";}
+    else{statusTag="Closed";cls="st-unclaimed-c";}
+    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${b.id}">
+      <div class="bh"><span class="bt">${esc(companyName(b.company_id))}</span><span class="bd">${fmtDateShort(b.submitted_date)}</span></div>
+      <div class="bd mono" style="margin-top:2px;font-weight:600;color:var(--ink-soft);">${esc(b.claim_no||"")}</div>
+      <div class="bd" style="margin-top:3px;">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)} · ${items.length} item${items.length!==1?"s":""}</div>
+      <div style="margin-top:8px;font-family:var(--mono);font-weight:600;">${amountLine(amounts.submitted)}</div>
+      ${b.status==="cancelled"?`<div class="bd" style="margin-top:3px;">Cancelled ${fmtDateShort(new Date(b.cancelled_at).toISOString().slice(0,10))}</div>`:""}
+      <div class="bstat"><span class="mini-tag ${cls}">${statusTag}</span>
+        ${pending?`<span class="mini-tag st-submitted-c">${pending} pending</span>`:""}
+        ${reimbursed?`<span class="mini-tag st-reimbursed-c">${reimbursed} paid</span>`:""}
+        ${rejected?`<span class="mini-tag st-rejected-c">${rejected} rejected</span>`:""}
+      </div>
+    </div>`;
+  }).join("");
   let body;
   if(batches.length===0){
     body=`<div class="empty"><h3>No claims yet</h3><p>Build a claim from the Claim tab to submit expenses together.</p></div>`;
   }else{
-    body=batches.map(b=>{
-      const items=byBatch[b.id]||[];
-      const amounts=batchAmounts(items);
-      const pending=items.filter(i=>i.outcome==="pending").length;
-      const reimbursed=items.filter(i=>i.outcome==="reimbursed").length;
-      const rejected=items.filter(i=>i.outcome==="rejected").length;
-      let statusTag,cls;
-      if(b.status==="cancelled"){statusTag="Cancelled";cls="st-rejected-c";}
-      else if(pending>0){statusTag="Outstanding";cls="st-submitted-c";}
-      else if(rejected>0&&reimbursed>0){statusTag="Partly reimbursed";cls="st-submitted-c";}
-      else if(reimbursed>0){statusTag="Reimbursed";cls="st-reimbursed-c";}
-      else{statusTag="Closed";cls="st-unclaimed-c";}
-      return `<div class="batch-card" data-id="${b.id}">
-        <div class="bh"><span class="bt">${esc(companyName(b.company_id))}</span><span class="bd">${fmtDateShort(b.submitted_date)}</span></div>
-        <div class="bd mono" style="margin-top:2px;font-weight:600;color:var(--ink-soft);">${esc(b.claim_no||"")}</div>
-        <div class="bd" style="margin-top:3px;">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)} · ${items.length} item${items.length!==1?"s":""}</div>
-        <div style="margin-top:8px;font-family:var(--mono);font-weight:600;">${amountLine(amounts.submitted)}</div>
-        ${b.status==="cancelled"?`<div class="bd" style="margin-top:3px;">Cancelled ${fmtDateShort(new Date(b.cancelled_at).toISOString().slice(0,10))}</div>`:""}
-        <div class="bstat"><span class="mini-tag ${cls}">${statusTag}</span>
-          ${pending?`<span class="mini-tag st-submitted-c">${pending} pending</span>`:""}
-          ${reimbursed?`<span class="mini-tag st-reimbursed-c">${reimbursed} paid</span>`:""}
-          ${rejected?`<span class="mini-tag st-rejected-c">${rejected} rejected</span>`:""}
-        </div>
-      </div>`;
-    }).join("");
+    body=`<div class="batch-section-title">Active claims</div>${active.length?cards(active):`<div class="empty" style="padding:30px 20px;"><h3>No active claims</h3><p>Cancelled claims remain available below.</p></div>`}${cancelled.length?`<button class="btn btn-ghost" id="toggleCancelled" style="margin:16px 0;">${showCancelledClaims?"Hide":"Show"} cancelled claims</button>`:""}${showCancelledClaims&&cancelled.length?`<div class="batch-section-title">Cancelled claims</div>${cards(cancelled)}`:""}`;
   }
   const sc=openScreen("Claims", body);
+  sc.querySelector("#toggleCancelled")?.addEventListener("click",()=>{showCancelledClaims=!showCancelledClaims;closeScreen(sc);setTimeout(openBatchesTab,260);});
   sc.querySelectorAll(".batch-card").forEach(c=>c.addEventListener("click",()=>{closeScreen(sc);setTimeout(()=>openBatchDetail(c.dataset.id),260);}));
 }
 
@@ -1623,7 +1650,7 @@ async function openBatchDetail(batchId){
 
   let actionBtn="";
   if(!isCancelled&&pendingCount>0){
-    actionBtn+=`<button class="btn btn-ghost" id="allPaid" style="margin-top:10px;">Mark all pending as reimbursed</button>`;
+    actionBtn+=`<button class="btn btn-positive" id="allPaid" style="margin-top:10px;">Reimburse all</button>`;
   }else if(!isCancelled&&reimbursedCount>0){
     actionBtn+=`<button class="btn btn-ghost" id="undoReimb" style="margin-top:10px;color:var(--danger);">Undo reimbursement</button>`;
   }
@@ -1649,14 +1676,12 @@ async function openBatchDetail(batchId){
     <div class="hint" style="margin-bottom:6px;">${isCancelled?"This cancelled claim is retained as read-only history.":"Tap an item to mark it reimbursed or rejected. Rejected items go back to Unclaimed for a future claim."}</div>
     <div class="section-label">Items</div>
     ${rows}
-    <button class="btn btn-primary" id="claimSheetBtn" style="margin-top:20px;">Claim sheet with photos (PDF)</button>
-    <button class="btn btn-ghost" id="csvBtn" style="margin-top:10px;">Download CSV (text only)</button>
+    <button class="btn btn-primary" id="claimSheetBtn" style="margin-top:20px;">Create Claim PDF</button>
     ${actionBtn}
   `;
   const sc=openScreen("Claim detail", body);
   if(!isCancelled)sc.querySelectorAll(".claim-row").forEach(r=>r.addEventListener("click",()=>itemOutcomeSheet(r.dataset.be,r.dataset.entry,batchId)));
   sc.querySelector("#claimSheetBtn").addEventListener("click",()=>exportClaimSheet(batchId));
-  sc.querySelector("#csvBtn").addEventListener("click",()=>exportBatchCSV(batchId));
   const slipThumb=sc.querySelector("#rbSlipThumb"); if(slipThumb) slipThumb.addEventListener("click",()=>viewImage(batch.reimburse_proof));
   const allPaidBtn=sc.querySelector("#allPaid"); if(allPaidBtn) allPaidBtn.addEventListener("click",()=>reimburseBatchSheet(batchId,items,sc));
   const undoBtn=sc.querySelector("#undoReimb"); if(undoBtn) undoBtn.addEventListener("click",()=>undoReimbursement(batchId,sc));
@@ -1693,16 +1718,35 @@ async function readBatchLifecycle(s,req,batchId){
   }
   return {batch,items,entries};
 }
-async function markBatchReimbursedAtomic(batchId,date,slipUrl,slipType){
+async function ensureNoOtherActiveMembership(s,req,be){
+  const memberships=await req(s.batch_entries.index("entry_id").getAll(IDBKeyRange.only(be.entry_id)));
+  for(const x of memberships){if(x.id===be.id)continue;const owner=await req(s.batches.get(x.batch_id));if(!owner)throw lifecycleError("This entry has a broken claim reference");if(owner.status!=="cancelled"&&(x.outcome==="pending"||x.outcome==="reimbursed"))throw lifecycleError("This entry already belongs to another active claim");}
+}
+function sameChangedFields(actual,expected){return actual.slice().sort().join("|")===[...(expected||[])].sort().join("|");}
+async function synchronizeAndSetOutcomeAtomic({batchId,batchEntryId,expectedOutcome,requestedOutcome,expectedChangedFields,expectedSnapshot}){
   return DB.runTransaction(["companies","batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
-    const {batch,items,entries}=await readBatchLifecycle(s,req,batchId),now=Date.now();
-    if(!validISODate(date))throw lifecycleError("Choose a valid reimbursement date");
-    const company=await req(s.companies.get(batch.company_id));
-    const mismatched=[];for(const be of items){if(be.outcome!=="pending"||entries.get(be.entry_id).status!=="submitted")throw lifecycleError("Every claim item must still be pending");const cmp=snapshotComparison(entries.get(be.entry_id),be,company);if(!cmp.matches)mismatched.push(`${be.vendor_snapshot}: ${cmp.changedFields.join(", ")}`);}
-    if(mismatched.length)throw lifecycleError(`Claim items no longer match the Log: ${mismatched.join("; ")}. Review and synchronize them before reimbursement.`);
-    let first=true;for(const be of items){be.outcome="reimbursed";be.outcome_updated_at=now;await req(s.batch_entries.put(be));if(first){auditFail("reimburse-after-first-item");first=false;}const entry=entries.get(be.entry_id);entry.status="reimbursed";entry.updated_at=now;await req(s.entries.put(entry));if(be===items[0])auditFail("reimburse-after-first-entry");}
-    batch.reimbursed_date=date;batch.reimbursed_at=now;batch.reimburse_proof=slipUrl||null;batch.reimburse_proof_type=slipType||null;await req(s.batches.put(batch));auditFail("reimburse-after-batch-metadata");
+    const batch=await req(s.batches.get(batchId));if(!batch)throw lifecycleError("This claim no longer exists");if(batch.status==="cancelled")throw lifecycleError("This cancelled claim is read-only.");
+    const be=await req(s.batch_entries.get(batchEntryId));if(!be||be.batch_id!==batchId)throw lifecycleError("This claim item no longer exists");if(be.outcome!==expectedOutcome)throw lifecycleError("This claim item changed — refresh and try again");
+    const allowed=(expectedOutcome==="pending"&&["reimbursed","rejected"].includes(requestedOutcome))||(expectedOutcome==="rejected"&&["pending","reimbursed"].includes(requestedOutcome));if(!allowed)throw lifecycleError(expectedOutcome==="reimbursed"?"Undo reimbursement before synchronizing this item.":"This action is not available for the current item state.");
+    const entry=await req(s.entries.get(be.entry_id));if(!entry)throw lifecycleError("The referenced Log entry no longer exists");if(entry.status!==statusForOutcome(expectedOutcome))throw lifecycleError("The claim item and Log entry status changed — refresh and try again");if(entry.company_id!==batch.company_id)throw lifecycleError("The Log entry belongs to another company and cannot be synchronized into this claim");
+    if(expectedOutcome==="rejected")await ensureNoOtherActiveMembership(s,req,be);
+    const company=await req(s.companies.get(batch.company_id)),cmp=snapshotComparison(entry,be,company);if(!sameChangedFields(cmp.changedFields,expectedChangedFields)||(expectedSnapshot&&snapshotToken(cmp.currentSnapshot)!==snapshotToken(expectedSnapshot)))throw lifecycleError("The Log entry changed again — review it and retry");
+    const now=Date.now();if(!cmp.matches){applyCurrentSnapshot(be,cmp.currentSnapshot);auditFail("sync-transition-after-snapshot");auditFail("sync-after-snapshot-replacement");be.synced_at=now;be.synced_fields=cmp.changedFields;await req(s.batch_entries.put(be));auditFail("sync-transition-after-metadata");}
+    be.outcome=requestedOutcome;be.outcome_updated_at=now;await req(s.batch_entries.put(be));auditFail("sync-transition-after-outcome");auditFail("sync-after-outcome-update");entry.status=statusForOutcome(requestedOutcome);entry.updated_at=now;await req(s.entries.put(entry));auditFail("sync-transition-after-entry");auditFail("sync-after-entry-status");
+    if(requestedOutcome!=="reimbursed"&&(batch.reimbursed_date||batch.reimbursed_at||batch.reimburse_proof)){clearBatchReimbursement(batch);await req(s.batches.put(batch));}
   });
+}
+async function reimburseBatchWithSyncAtomic(batchId,date,slipUrl,slipType,expectedMismatches,expectedSnapshots){
+  return DB.runTransaction(["companies","batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
+    const {batch,items,entries}=await readBatchLifecycle(s,req,batchId),now=Date.now();if(!validISODate(date))throw lifecycleError("Choose a valid reimbursement date");const company=await req(s.companies.get(batch.company_id)),actual={};
+    for(const be of items){const entry=entries.get(be.entry_id);if(be.outcome!=="pending"||entry.status!=="submitted")throw lifecycleError("Every claim item must still be pending");if(entry.company_id!==batch.company_id)throw lifecycleError(`${be.vendor_snapshot} belongs to another company`);const cmp=snapshotComparison(entry,be,company);if(!cmp.matches)actual[be.id]=cmp.changedFields;}
+    const expected=expectedMismatches||{},actualIds=Object.keys(actual).sort(),expectedIds=Object.keys(expected).sort();if(JSON.stringify(actualIds)!==JSON.stringify(expectedIds)||actualIds.some(id=>!sameChangedFields(actual[id],expected[id])))throw lifecycleError("Claim items changed again — review them and retry");for(const id of actualIds){if(expectedSnapshots?.[id]){const be=items.find(x=>x.id===id),cmp=snapshotComparison(entries.get(be.entry_id),be,company);if(snapshotToken(cmp.currentSnapshot)!==snapshotToken(expectedSnapshots[id]))throw lifecycleError("A Log entry changed again — review the batch and retry");}}
+    let firstSync=true,firstItem=true;for(const be of items){const entry=entries.get(be.entry_id),fields=actual[be.id];if(fields){const cmp=snapshotComparison(entry,be,company);applyCurrentSnapshot(be,cmp.currentSnapshot);be.synced_at=now;be.synced_fields=fields;await req(s.batch_entries.put(be));if(firstSync){auditFail("reimburse-all-sync-after-first-snapshot");firstSync=false;}}be.outcome="reimbursed";be.outcome_updated_at=now;await req(s.batch_entries.put(be));if(firstItem){auditFail("reimburse-all-sync-after-first-item");auditFail("reimburse-after-first-item");}entry.status="reimbursed";entry.updated_at=now;await req(s.entries.put(entry));if(firstItem){auditFail("reimburse-all-sync-after-first-entry");auditFail("reimburse-after-first-entry");firstItem=false;}}
+    batch.reimbursed_date=date;batch.reimbursed_at=now;batch.reimburse_proof=slipUrl||null;batch.reimburse_proof_type=slipType||null;await req(s.batches.put(batch));auditFail("reimburse-all-sync-after-metadata");auditFail("reimburse-after-batch-metadata");
+  });
+}
+async function markBatchReimbursedAtomic(batchId,date,slipUrl,slipType){
+  return reimburseBatchWithSyncAtomic(batchId,date,slipUrl,slipType,{});
 }
 async function undoReimbursementAtomic(batchId){
   return DB.runTransaction(["batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
@@ -1743,16 +1787,7 @@ async function cancelClaimAtomic(batchId){
   });
 }
 async function synchronizeRejectedItemAtomic(beId,batchId,expectedChangedFields){
-  return DB.runTransaction(["companies","batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
-    const batch=await req(s.batches.get(batchId));if(!batch||batch.status==="cancelled")throw lifecycleError("This claim is no longer active");
-    const be=await req(s.batch_entries.get(beId));if(!be||be.batch_id!==batchId||be.outcome!=="rejected")throw lifecycleError("This rejected item changed — refresh and try again");
-    const entry=await req(s.entries.get(be.entry_id));if(!entry||entry.status!=="unclaimed")throw lifecycleError("The Log entry is no longer unclaimed");
-    const memberships=await req(s.batch_entries.index("entry_id").getAll(IDBKeyRange.only(be.entry_id)));for(const x of memberships){if(x.id===be.id)continue;const owner=await req(s.batches.get(x.batch_id));if(!owner)throw lifecycleError("This entry has a broken claim reference");if(owner.status!=="cancelled"&&(x.outcome==="pending"||x.outcome==="reimbursed"))throw lifecycleError("This entry already belongs to another active claim");}
-    if(entry.company_id!==batch.company_id)throw lifecycleError("The Log entry belongs to another company and cannot be synchronized into this claim");
-    const company=await req(s.companies.get(batch.company_id)),cmp=snapshotComparison(entry,be,company),expected=[...(expectedChangedFields||[])].sort().join("|");
-    if(cmp.changedFields.slice().sort().join("|")!==expected)throw lifecycleError("The Log entry changed again — review it and retry");
-    const now=Date.now();applyCurrentSnapshot(be,cmp.currentSnapshot);auditFail("sync-after-snapshot-replacement");be.outcome="pending";be.outcome_updated_at=now;be.synced_at=now;be.synced_fields=cmp.changedFields;await req(s.batch_entries.put(be));auditFail("sync-after-outcome-update");entry.status="submitted";entry.updated_at=now;await req(s.entries.put(entry));auditFail("sync-after-entry-status");
-  });
+  return synchronizeAndSetOutcomeAtomic({batchId,batchEntryId:beId,expectedOutcome:"rejected",requestedOutcome:"pending",expectedChangedFields});
 }
 async function deleteEntryAtomic(id){
   return DB.runTransaction(["entries","proofs","batch_entries","edits"],"readwrite",async(s,t,req)=>{
@@ -1768,6 +1803,11 @@ async function deleteEntryAtomic(id){
 // Batch-level reimbursement: capture the date + an optional payment-slip photo,
 // then mark all pending items reimbursed. Slip is stored as a base64 data URL on
 // the batch record so it travels inside JSON backups.
+async function inspectBatchReimbursement(batchId){
+  const batch=await DB.get("batches",batchId);if(!batch)throw lifecycleError("This claim no longer exists");if(batch.status==="cancelled")throw lifecycleError("This cancelled claim is read-only.");const items=await DB.getByIndex("batch_entries","batch_id",batchId),company=await DB.get("companies",batch.company_id),mismatches={},snapshots={},details=[];
+  for(const be of items){const entry=await DB.get("entries",be.entry_id);if(!entry)throw lifecycleError(`${be.vendor_snapshot}: Log entry is missing`);if(be.outcome!=="pending"||entry.status!=="submitted")throw lifecycleError("Every claim item must still be pending");if(entry.company_id!==batch.company_id)throw lifecycleError(`${be.vendor_snapshot}: company no longer matches the claim`);const cmp=snapshotComparison(entry,be,company);if(!cmp.matches){mismatches[be.id]=cmp.changedFields;snapshots[be.id]=cmp.currentSnapshot;details.push({label:entry.vendor||entry.location_label||be.vendor_snapshot,fields:cmp.changedFields});}}
+  return {mismatches,snapshots,details};
+}
 function reimburseBatchSheet(batchId,items,sc){
   openSheet(`<h3>Mark batch reimbursed</h3>
     <div class="field nomb" style="margin-bottom:12px;">
@@ -1795,7 +1835,10 @@ function reimburseBatchSheet(batchId,items,sc){
     const date=q("#rbDate").value;
     if(!date){ toast("Choose a date"); return; }
     const btn=q("#rbConfirm");if(btn.dataset.busy)return;btn.dataset.busy="1";btn.disabled=true;
-    try{await markBatchReimbursedAtomic(batchId,date,slipUrl,slipType);await loadAll();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("Batch marked reimbursed");}
+    try{const inspection=await inspectBatchReimbursement(batchId);if(inspection.details.length){
+        openSheet(`<h3>Claim items changed</h3><p class="hint">Some claim items changed in the Log.<br><br>Update them to match the Log and reimburse all pending items?</p><div class="summary" style="margin:12px 0;">${inspection.details.map(x=>`<div class="srow"><span class="k">${esc(x.label)}</span><span class="v">${esc(x.fields.join(", "))}</span></div>`).join("")}</div><button class="btn btn-positive" id="syncAllYes">Update &amp; reimburse all</button><button class="btn btn-ghost" id="syncAllNo" style="margin-top:10px;">Cancel</button>`);
+        document.querySelector("#syncAllNo").addEventListener("click",closeSheet);document.querySelector("#syncAllYes").addEventListener("click",async()=>{const yes=document.querySelector("#syncAllYes");if(yes.dataset.busy)return;yes.dataset.busy="1";yes.disabled=true;try{await reimburseBatchWithSyncAtomic(batchId,date,slipUrl,slipType,inspection.mismatches,inspection.snapshots);await loadAll();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("All items reimbursed");}catch(e){console.error("Synchronized batch reimbursement failed",e);toast(e.message||"Claim could not be reimbursed");delete yes.dataset.busy;yes.disabled=false;}});return;
+      }await markBatchReimbursedAtomic(batchId,date,slipUrl,slipType);await loadAll();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("Batch reimbursed");}
     catch(e){console.error("Batch reimbursement failed",e);toast(e.message||"Claim could not be updated");delete btn.dataset.busy;btn.disabled=false;}
   });
 }
@@ -1831,7 +1874,7 @@ function cancelClaim(batchId,sc){
 async function itemOutcomeSheet(beId,entryId,batchId){
   const cur=(await DB.get("batch_entries",beId))?.outcome;
   const opts=[
-    {o:"reimbursed",label:"Reimbursed"},
+    {o:"reimbursed",label:"Reimburse"},
     {o:"rejected",label:"Rejected — send back to Unclaimed"},
     {o:"pending",label:"Reset to Pending"},
   ];
@@ -1844,15 +1887,15 @@ async function itemOutcomeSheet(beId,entryId,batchId){
   $$("#sheet .list-choice button[data-o]").forEach(b=>b.addEventListener("click",async()=>{
     if(b.dataset.busy)return;b.dataset.busy="1";b.disabled=true;
     try{
-      if(cur==="rejected"&&b.dataset.o==="pending"){
-        const [batch,be,entry]=await Promise.all([DB.get("batches",batchId),DB.get("batch_entries",beId),DB.get("entries",entryId)]);if(!batch||batch.status==="cancelled"||!be||be.outcome!=="rejected"||!entry||entry.status!=="unclaimed")throw lifecycleError("This item changed — refresh and try again");
-        const company=await DB.get("companies",batch.company_id),cmp=snapshotComparison(entry,be,company);
-        if(!cmp.matches){
-          openSheet(`<h3>Entry changed after rejection</h3><p class="hint">This entry has changed since it was added to the claim. Update the claim item to match the Log and reset it to pending?</p><div class="summary" style="margin:12px 0;">${cmp.changedFields.map(x=>`<div class="srow"><span class="k">Changed</span><span class="v">${esc(x)}</span></div>`).join("")}</div><button class="btn btn-primary" id="syncYes">Update &amp; reset to pending</button><button class="btn btn-ghost" id="syncNo" style="margin-top:10px;">Keep rejected</button>`);
-          document.querySelector("#syncNo").addEventListener("click",closeSheet);document.querySelector("#syncYes").addEventListener("click",async()=>{const yes=document.querySelector("#syncYes");if(yes.dataset.busy)return;yes.dataset.busy="1";yes.disabled=true;try{await synchronizeRejectedItemAtomic(beId,batchId,cmp.changedFields);await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Claim item synchronized and reset");}catch(e){console.error("Item synchronization failed",e);toast(e.message||"Item could not be synchronized");delete yes.dataset.busy;yes.disabled=false;}});return;
-        }
+      const requested=b.dataset.o,[batch,be,entry]=await Promise.all([DB.get("batches",batchId),DB.get("batch_entries",beId),DB.get("entries",entryId)]);if(!batch)throw lifecycleError("This claim no longer exists");if(batch.status==="cancelled")throw lifecycleError("This cancelled claim is read-only.");if(!be||be.batch_id!==batchId||be.outcome!==cur)throw lifecycleError("This claim item changed — refresh and try again");if(!entry)throw lifecycleError("The referenced Log entry no longer exists");if(entry.status!==statusForOutcome(cur))throw lifecycleError("The claim item and Log entry status changed — refresh and try again");if(entry.company_id!==batch.company_id)throw lifecycleError("The Log entry belongs to another company and cannot be synchronized into this claim");
+      if(cur==="rejected"){const memberships=await DB.getByIndex("batch_entries","entry_id",entryId);for(const x of memberships){if(x.id===beId)continue;const owner=await DB.get("batches",x.batch_id);if(!owner)throw lifecycleError("This entry has a broken claim reference");if(owner.status!=="cancelled"&&(x.outcome==="pending"||x.outcome==="reimbursed"))throw lifecycleError("This entry already belongs to another active claim");}}
+      const company=await DB.get("companies",batch.company_id),cmp=snapshotComparison(entry,be,company);if(cur==="reimbursed"&&!cmp.matches)throw lifecycleError(`This reimbursed item no longer matches the Log (${cmp.changedFields.join(", ")}). Undo reimbursement before synchronizing or changing it.`);
+      const canSync=(cur==="pending"&&["reimbursed","rejected"].includes(requested))||(cur==="rejected"&&["pending","reimbursed"].includes(requested));
+      if(!cmp.matches&&canSync){const action=requested==="reimbursed"?"reimburse":requested==="rejected"?"reject":"reset to pending",lead=cur==="rejected"&&requested==="reimbursed"?"This Log entry changed after it was rejected.":"This claim item no longer matches the Log.";
+        openSheet(`<h3>Update claim item?</h3><p class="hint">${lead}<br><br>Update the claim item to match the Log and ${action} it?</p><div class="summary" style="margin:12px 0;">${cmp.changedFields.map(x=>`<div class="srow"><span class="k">Changed</span><span class="v">${esc(x)}</span></div>`).join("")}</div><button class="btn ${requested==="reimbursed"?"btn-positive":"btn-primary"}" id="syncYes">Update &amp; ${action}</button><button class="btn btn-ghost" id="syncNo" style="margin-top:10px;">Cancel</button>`);
+        document.querySelector("#syncNo").addEventListener("click",closeSheet);document.querySelector("#syncYes").addEventListener("click",async()=>{const yes=document.querySelector("#syncYes");if(yes.dataset.busy)return;yes.dataset.busy="1";yes.disabled=true;try{await synchronizeAndSetOutcomeAtomic({batchId,batchEntryId:beId,expectedOutcome:cur,requestedOutcome:requested,expectedChangedFields:cmp.changedFields,expectedSnapshot:cmp.currentSnapshot});await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast(requested==="reimbursed"?"Claim item updated and reimbursed":requested==="rejected"?"Claim item updated and rejected":"Claim item updated and reset");}catch(e){console.error("Synchronized item transition failed",e);toast(e.message||"Item could not be updated");delete yes.dataset.busy;yes.disabled=false;}});return;
       }
-      await setItemOutcomeAtomic(beId,batchId,cur,b.dataset.o);await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Updated");}
+      if(canSync)await synchronizeAndSetOutcomeAtomic({batchId,batchEntryId:beId,expectedOutcome:cur,requestedOutcome:requested,expectedChangedFields:[]});else await setItemOutcomeAtomic(beId,batchId,cur,requested);await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Updated");}
     catch(e){console.error("Item outcome update failed",e);toast(e.message||"Item could not be updated");delete b.dataset.busy;b.disabled=false;}
   }));
 }
@@ -1905,6 +1948,7 @@ async function exportClaimSheet(batchId){
     const ocLabel={pending:"Pending",reimbursed:"Reimbursed",rejected:"Rejected"}[be.outcome]||"";
     entriesHTML+=`<div class="pitem">
       <div class="pcard">
+        <div class="pitem-no">Item ${idx+1}</div>
         <div class="pamt">${money(be.amount_minor_snapshot,be.currency_snapshot)}</div>
         <div class="pcur">${be.currency_snapshot}</div>
         ${ocLabel?`<div class="pstatus">${ocLabel}</div>`:""}
