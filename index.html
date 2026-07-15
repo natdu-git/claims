@@ -53,11 +53,11 @@
   }
   .topbar .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;font-size:12px;color:var(--ink-soft);}
   .topbar .brand .dot{width:7px;height:7px;border-radius:2px;background:var(--jade);}
-  .owed-label{font-size:12px;color:var(--ink-soft);margin-top:14px;letter-spacing:.03em;}
-  .owed-figs{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:4px;align-items:baseline;}
-  .owed-figs .fig{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:26px;font-weight:600;letter-spacing:-.02em;}
-  .owed-figs .fig.zero{color:var(--slate);font-size:20px;}
-  .owed-sub{font-size:11px;color:var(--ink-soft);margin-top:3px;}
+  .action-summary{display:flex;gap:18px;margin-top:14px;}
+  .action-summary .side{width:50%;min-width:0;}
+  .action-summary .side:last-child{text-align:right;}
+  .action-summary .lab{font-size:11.5px;color:var(--ink-soft);}
+  .action-summary .amounts{font-family:var(--mono);font-size:18px;font-weight:650;line-height:1.35;margin-top:3px;overflow-wrap:anywhere;}
 
   /* ---------- Filter chips ---------- */
   .filters{display:flex;gap:8px;overflow-x:auto;padding:12px 14px;background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10;scrollbar-width:none;}
@@ -84,7 +84,9 @@
   .rline2{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-top:4px;}
   .rline2 .meta{font-size:12.5px;color:var(--slate);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .rline2 .cur{font-size:10.5px;font-weight:600;letter-spacing:.04em;color:var(--slate);white-space:nowrap;flex:none;}
-  .row-status{text-align:right;min-width:0;max-width:58%;flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .row-status{display:flex;justify-content:flex-end;align-items:baseline;text-align:right;min-width:0;max-width:58%;flex:0 1 auto;white-space:nowrap;overflow:hidden;}
+  .claim-id-part{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .claim-separator,.status-part{flex:none;}
   .claim-id-inline{font-size:10px;font-weight:500;color:var(--slate);}
   .claim-id-warning{color:var(--danger);}
   .row .type-badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:4px;margin-right:6px;vertical-align:1px;}
@@ -361,6 +363,27 @@
   .sum-row:last-child{border-bottom:none;}
   .sum-row .v{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;}
   .sum-big .v{font-size:16px;}
+  .batch-filter{width:auto;margin:0 0 12px;padding:8px 13px;}
+  .batch-card-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(100px,.8fr);gap:5px 12px;align-items:baseline;}
+  .batch-card-grid .left{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .batch-card-grid .right{text-align:right;min-width:0;}
+  .batch-card-grid .total{white-space:nowrap;font-family:var(--mono);font-weight:650;}
+  .batch-card-grid .claim-line{font-weight:600;}
+  .batch-card-grid .outcomes{font-size:11.5px;color:var(--slate);}
+  .batch-card.cancelled .batch-card-grid{color:var(--slate);}
+  .travel-calc{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+  .rate-action{font-size:12px;color:var(--jade);margin-top:5px;}
+  .dest-card{margin-bottom:10px;}
+  .dest-actions{display:flex;gap:8px;margin-top:8px;}
+  .psection-title{font-size:16px;font-weight:700;margin:18px 0 8px;}
+  .ptravel{width:100%;border-collapse:collapse;font-size:10px;}
+  .ptravel thead{display:table-header-group;}
+  .ptravel th,.ptravel td{border:1px solid #bbb;padding:5px 4px;vertical-align:top;}
+  .ptravel th{background:#f2f2f2;text-align:left;}
+  .ptravel .num{text-align:right;white-space:nowrap;}
+  .ptravel tr{break-inside:avoid;page-break-inside:avoid;}
+  .travel-proof{break-inside:avoid;page-break-inside:avoid;margin:10px 0 16px;}
+  .travel-proof h4{margin:0 0 7px;font-size:11px;}
 </style>
 </head>
 <body>
@@ -371,9 +394,7 @@
     <div class="brand"><span class="dot"></span> Claims</div>
     <button class="topbtn" id="summaryBtn">Summary</button>
   </div>
-  <div class="owed-label" id="owedLabel">Outstanding — submitted, not yet reimbursed</div>
-  <div class="owed-figs" id="owedFigs"></div>
-  <div class="owed-sub" id="owedSub"></div>
+  <div class="action-summary" id="actionSummary"></div>
 </div>
 
 <div id="backupBanner"></div>
@@ -428,6 +449,10 @@ function companyColor(id){const c=state.companies.find(x=>x.id===id);return (c&&
 // THB claim value of an entry. THB entries use their own amount; foreign entries use the
 // manually-entered claim_thb_minor (null until filled from the card statement).
 function claimThb(e){ return e.currency==="THB" ? e.amount_minor : (e.claim_thb_minor!=null ? e.claim_thb_minor : null); }
+function travelFuelMinor(distance,rate){return Math.round(Math.round(Number(distance||0)*10)*rate/10);}
+function normalizeTravel(e){if(e.type!=="travel")return e;const legacy=e.travel_distance_km==null&&e.travel_fuel_rate_minor==null;return {...e,travel_destination:e.travel_destination??e.location_label??"",travel_distance_km:e.travel_distance_km??null,travel_fuel_rate_minor:e.travel_fuel_rate_minor??null,travel_fuel_minor:e.travel_fuel_minor??(legacy?0:travelFuelMinor(e.travel_distance_km,e.travel_fuel_rate_minor)),travel_toll_minor:e.travel_toll_minor??e.amount_minor??0,travel_total_minor:e.travel_total_minor??e.amount_minor??0,travel_preset_id:e.travel_preset_id??null,travel_legacy:legacy};}
+function applyDestination(d,p){d.travel_preset_id=p?.id||null;d.travel_destination=p?.name||"";d.location_label=d.travel_destination;d.location_lat=p?.lat??null;d.location_lng=p?.lng??null;d.travel_distance_km=p?.distance_km??null;d.travel_fuel_rate_minor=p?.fuel_rate_minor??state.fuelRateMinor;d.travel_toll_minor=p?.toll_minor??0;recalcTravel(d);}
+function recalcTravel(d){d.travel_fuel_minor=travelFuelMinor(d.travel_distance_km,d.travel_fuel_rate_minor);d.travel_total_minor=d.travel_fuel_minor+(Number.isSafeInteger(d.travel_toll_minor)?d.travel_toll_minor:0);d.amount_minor=d.travel_total_minor;d.amount_str=(d.amount_minor/100).toFixed(2);d.currency="THB";}
 // Short code used as the claim-ID prefix (e.g. "TOTEM"). Auto-derived from the name but editable.
 function codeFromName(name){ return ((name||"").toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6)) || "CO"; }
 // Human-readable claim ID: CODE-YEAR-NNN, with a persistent per-company-per-year counter in meta.
@@ -536,8 +561,11 @@ const state = {
   tab:"home",
   companies:[],
   entries:[],
-  filter:{company:null, status:null, from:null, to:null, q:""},
+  filter:{company:null, status:null, from:null, to:null, q:"", tags:[]},
   defaultCurrency:"THB",
+  fuelRateMinor:450,
+  destinations:[],
+  batchFilter:"active",
   activeClaimIds:new Map(),
   activeClaimIntegrity:new Set(),
 };
@@ -556,6 +584,9 @@ async function loadAll(){
   state.claimantName = cn?.v || "";
   const lb = await DB.get("meta","lastBackupAt");
   state.lastBackupAt = lb?.v || 0;
+  const fr=await DB.get("meta","travelFuelRateMinor"),dp=await DB.get("meta","travelDestinations");
+  state.fuelRateMinor=Number.isSafeInteger(fr?.v)&&fr.v>=0?fr.v:450;
+  state.destinations=Array.isArray(dp?.v)?dp.v.map(x=>({...x})):[];
   const batches=await DB.getAll("batches"),batchEntries=await DB.getAll("batch_entries"),batchById=new Map(batches.map(b=>[b.id,b])),activeClaims=new Map(),integrity=new Set();
   for(const be of batchEntries){const batch=batchById.get(be.batch_id);if(!batch||batch.status==="cancelled"||!(be.outcome==="pending"||be.outcome==="reimbursed"))continue;if(activeClaims.has(be.entry_id)){activeClaims.delete(be.entry_id);integrity.add(be.entry_id);console.error("Entry belongs to more than one active claim",be.entry_id);}else if(!integrity.has(be.entry_id))activeClaims.set(be.entry_id,batch.claim_no||"Claim");}
   state.activeClaimIds=activeClaims;state.activeClaimIntegrity=integrity;
@@ -569,6 +600,8 @@ async function loadAll(){
   state.hasData = state.entries.length>0 || state.companies.length>0;
 }
 function companyName(id){const c=state.companies.find(c=>c.id===id);return c?c.name:"—";}
+function entryDisplayName(e){return e.type==="travel"?(e.travel_destination||e.location_label||companyName(e.company_id)):(e.vendor||companyName(e.company_id));}
+function snapshotDisplayName(be){return be.type_snapshot==="travel"?(be.travel_destination_snapshot||be.location_label_snapshot||be.vendor_snapshot||"Travel"):(be.vendor_snapshot||"Expense");}
 
 async function proofCount(entryId){const p=await DB.getByIndex("proofs","entry_id",entryId);return p.length;}
 
@@ -576,24 +609,10 @@ async function proofCount(entryId){const p=await DB.getByIndex("proofs","entry_i
    HOME / LOG
    ============================================================ */
 async function renderHome(){
-  // outstanding = submitted entries. THB claim values roll into one THB figure; foreign items
-  // that don't have a THB amount yet show separately in their own currency.
-  const owed={};
-  state.entries.filter(e=>e.status==="submitted").forEach(e=>{
-    const thb=claimThb(e);
-    if(thb!=null){ owed["THB"]=(owed["THB"]||0)+thb; }
-    else { owed[e.currency]=(owed[e.currency]||0)+e.amount_minor; }
-  });
-  const figs=$("#owedFigs"), sub=$("#owedSub");
-  const keys=Object.keys(owed);
-  if(keys.length===0){
-    figs.innerHTML=`<span class="fig zero">Nothing outstanding</span>`;
-    sub.textContent="Amounts you've submitted appear here until reimbursed.";
-  }else{
-    figs.innerHTML=keys.map(c=>`<span class="fig">${money(owed[c],c)}</span>`).join("");
-    const n=state.entries.filter(e=>e.status==="submitted").length;
-    sub.textContent=`${n} entr${n===1?"y":"ies"} awaiting reimbursement.`;
-  }
+  const summary=$("#actionSummary"),aggregate=status=>{const out={};state.entries.filter(e=>e.status===status).forEach(e=>{const thb=claimThb(e),c=thb!=null?"THB":e.currency,v=thb!=null?thb:e.amount_minor;out[c]=(out[c]||0)+v;});return out;};
+  const line=o=>Object.keys(o).sort((a,b)=>a==="THB"?-1:b==="THB"?1:a.localeCompare(b)).map(c=>money(o[c],c)).join(" · ")||"—";
+  const un=state.entries.filter(e=>e.status==="unclaimed").length,su=state.entries.filter(e=>e.status==="submitted").length;
+  summary.innerHTML=`<div class="side"><div class="lab">Unclaimed · ${un} ${un===1?"entry":"entries"}</div><div class="amounts">${line(aggregate("unclaimed"))}</div></div><div class="side"><div class="lab">Submitted · ${su} ${su===1?"entry":"entries"}</div><div class="amounts">${line(aggregate("submitted"))}</div></div>`;
   renderFilters();
   renderBackupBanner();
   await renderLog();
@@ -619,11 +638,14 @@ function renderBackupBanner(){
 
 function renderFilters(){
   const f=$("#filters");const c=state.filter;
+  if(!Array.isArray(c.tags))c.tags=[];
   const parts=[];
-  parts.push(`<button class="chip ${c.company?'active':''}" data-f="company">${c.company?esc(companyName(c.company)):"All companies"} ${c.company?'<span class="x">×</span>':'▾'}</button>`);
-  parts.push(`<button class="chip ${c.status?'active':''}" data-f="status">${c.status?STATUS_LABEL[c.status]:"Any status"} ${c.status?'<span class="x">×</span>':'▾'}</button>`);
-  const dateLabel = (c.from||c.to) ? `${c.from?fmtDateShort(c.from):"…"} – ${c.to?fmtDateShort(c.to):"…"}` : "Any date";
+  parts.push(`<button class="chip ${c.company?'active':''}" data-f="company">${c.company?esc(companyName(c.company)):"Company"} ${c.company?'<span class="x">×</span>':'▾'}</button>`);
+  parts.push(`<button class="chip ${c.status?'active':''}" data-f="status">${c.status?STATUS_LABEL[c.status]:"Status"} ${c.status?'<span class="x">×</span>':'▾'}</button>`);
+  const dateLabel = (c.from||c.to) ? `${c.from?fmtDateShort(c.from):"…"} – ${c.to?fmtDateShort(c.to):"…"}` : "Date";
   parts.push(`<button class="chip ${(c.from||c.to)?'active':''}" data-f="date">${dateLabel} ${(c.from||c.to)?'<span class="x">×</span>':'▾'}</button>`);
+  const tagLabel=c.tags.length?(c.tags.length===1?c.tags[0]:`${c.tags[0]} +${c.tags.length-1}`):"Tags";
+  parts.push(`<button class="chip ${c.tags.length?'active':''}" data-f="tags">${esc(tagLabel)} ${c.tags.length?'<span class="x">×</span>':'▾'}</button>`);
   f.innerHTML=parts.join("");
 }
 
@@ -634,6 +656,7 @@ function filteredEntries(){
   if(c.status) list=list.filter(e=>e.status===c.status);
   if(c.from) list=list.filter(e=>e.payment_date>=c.from);
   if(c.to) list=list.filter(e=>e.payment_date<=c.to);
+  if(Array.isArray(c.tags)&&c.tags.length)list=list.filter(e=>(e.tags||[]).some(t=>c.tags.includes(t)));
   if(c.q){ const q=c.q.toLowerCase(); list=list.filter(e=>
     (e.vendor||"").toLowerCase().includes(q) ||
     (e.notes||"").toLowerCase().includes(q) ||
@@ -655,24 +678,21 @@ function amountMainHTML(e){
 }
 function logRowHTML(e, noProof){
   const showNoProof = noProof && !(e.type==='travel' && e.amount_minor===0);
-  const curLine = (e.type==='travel'&&e.amount_minor===0)
-    ? `<span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`
-    : `${e.currency} · <span class="st-word-${e.status}">${STATUS_LABEL[e.status]}</span>`;
   const tags = (e.tags&&e.tags.length)
     ? `<div class="row-tags">${[...e.tags].sort((a,b)=>a.localeCompare(b)).slice(0,4).map(esc).join(", ")}${e.tags.length>4?`, +${e.tags.length-4}`:""}</div>` : "";
   const claimNo=state.activeClaimIds.get(e.id),claimWarning=state.activeClaimIntegrity.has(e.id);
-  const claimMeta=claimWarning?`<span class="claim-id-inline claim-id-warning" title="Multiple active claim memberships detected" aria-label="Warning: multiple active claim memberships"> · ⚠ claim conflict</span>`:claimNo?`<span class="claim-id-inline mono" title="Active claim ${esc(claimNo)}" aria-label="Active claim ${esc(claimNo)}"> · ${esc(claimNo)}</span>`:"";
+  const claimMeta=claimWarning?`<span class="claim-id-part claim-id-inline claim-id-warning" title="Multiple active claim memberships detected" aria-label="Warning: multiple active claim memberships">⚠ claim conflict</span><span class="claim-separator"> · </span>`:claimNo?`<span class="claim-id-part claim-id-inline mono" title="Active claim ${esc(claimNo)}" aria-label="Active claim ${esc(claimNo)}">${esc(claimNo)}</span><span class="claim-separator"> · </span>`:"";
   return `<div class="row" data-id="${e.id}">
       <div class="accent st-${e.status}"></div>
       ${showNoProof?`<span class="noproof-top">⚠ no proof</span>`:""}
       <div class="body">
         <div class="rline1">
-          <div class="vendor">${esc(e.vendor||e.location_label||companyName(e.company_id))}</div>
+          <div class="vendor">${esc(entryDisplayName(e))}</div>
           <div class="amt-main">${amountMainHTML(e)}</div>
         </div>
         <div class="rline2">
           <div class="meta"><span class="type-badge type-${e.type}">${e.type}</span><span class="co-dot" style="background:${companyColor(e.company_id)}"></span>${esc(companyName(e.company_id))}</div>
-          <div class="cur row-status">${curLine}${claimMeta}</div>
+          <div class="cur row-status">${claimMeta}<span class="status-part st-word-${e.status}">${STATUS_LABEL[e.status]}</span></div>
         </div>
         ${tags}
       </div>
@@ -757,6 +777,7 @@ function newDraft(){
     claim_thb_minor:null, claim_thb_str:"",
     payment_date:todayISO(), notes:"", tags:[],
     location_lat:null, location_lng:null, location_label:"",
+    travel_destination:"",travel_distance_km:null,travel_fuel_rate_minor:state.fuelRateMinor,travel_fuel_minor:0,travel_toll_minor:0,travel_total_minor:0,travel_preset_id:null,
     status:"unclaimed", _proofs:[], _isNew:true};
 }
 
@@ -775,7 +796,7 @@ async function openAddEntry(existing){
     return;
   }
   if(existing){
-    draft={...existing, amount_str:(existing.amount_minor/100).toString(), claim_thb_str:(existing.claim_thb_minor!=null?(existing.claim_thb_minor/100).toString():""), tags:[...(existing.tags||[])], _proofs:[], _isNew:false};
+    existing=normalizeTravel(existing);draft={...existing, amount_str:(existing.amount_minor/100).toString(), claim_thb_str:(existing.claim_thb_minor!=null?(existing.claim_thb_minor/100).toString():""), tags:[...(existing.tags||[])], _proofs:[], _isNew:false};
     const proofs=await DB.getByIndex("proofs","entry_id",existing.id);
     draft._proofs=proofs.map(p=>({id:p.id, file_type:p.file_type, name:p.name, blob:p.blob, _existing:true}));
   }else{
@@ -786,6 +807,7 @@ async function openAddEntry(existing){
 }
 
 function renderEntryForm(allTags, isEdit){
+  throw new Error("Legacy entry form is disabled; use renderEntryFormCompact");
   const d=draft;
   const isTravel=d.type==='travel';
   const body=`
@@ -963,7 +985,7 @@ async function collectAndSave(screen,isEdit){
   const amt=parseFloat(d.amount_str);
   if(!d.company_id){toast("Choose a company");return;}
   if(isTravel){
-    if(d.location_lat==null){toast("Pin a location for travel");return;}
+    if(!d.location_label){toast("Enter a destination");return;}
     d.amount_minor=(amt&&amt>0)?Math.round(amt*100):0;
     d.vendor="";d.notes="";d.tags=[];
   }else{
@@ -1022,7 +1044,7 @@ async function saveEntry(isEdit){
   if(isEdit){
     const before=state.entries.find(e=>e.id===d.id);
     changes={};
-    const fields=["amount_minor","currency","claim_thb_minor","vendor","payment_date","notes","company_id","type","location_label"];
+    const fields=["amount_minor","currency","claim_thb_minor","vendor","payment_date","notes","company_id","type","location_label","travel_destination","travel_distance_km","travel_fuel_rate_minor","travel_fuel_minor","travel_toll_minor","travel_total_minor","travel_preset_id","location_lat","location_lng"];
     fields.forEach(f=>{ if((before[f]??"")!==(d[f]??"")) changes[f]=[before[f],d[f]]; });
     if(JSON.stringify((before.tags||[]).sort())!==JSON.stringify([...d.tags].sort())) changes.tags=[before.tags||[],d.tags];
   }
@@ -1034,6 +1056,7 @@ async function saveEntry(isEdit){
     amount_minor:d.amount_minor, currency:d.currency, claim_thb_minor,
     vendor:d.vendor, payment_date:d.payment_date, notes:d.notes, tags:d.tags,
     location_lat:d.location_lat, location_lng:d.location_lng, location_label:d.location_label,
+    travel_destination:d.type==="travel"?d.travel_destination||d.location_label||"":"",travel_distance_km:d.type==="travel"?d.travel_distance_km:null,travel_fuel_rate_minor:d.type==="travel"?d.travel_fuel_rate_minor:null,travel_fuel_minor:d.type==="travel"?d.travel_fuel_minor:null,travel_toll_minor:d.type==="travel"?d.travel_toll_minor:null,travel_total_minor:d.type==="travel"?d.travel_total_minor:null,travel_preset_id:d.type==="travel"?d.travel_preset_id:null,
     status:d.status||"unclaimed",
     created_at:d._isNew?now:(state.entries.find(e=>e.id===d.id)?.created_at||now),
     updated_at:now,
@@ -1092,6 +1115,8 @@ function renderEntryFormCompact(allTags, isEdit){
   cfTags=allTags.slice();
   const d=draft;
   const isTravel=d.type==="travel";
+  if(!d._expenseDraft)d._expenseDraft=isTravel?{amount_str:"",amount_minor:null,currency:state.companies.find(c=>c.id===d.company_id)?.default_currency||state.defaultCurrency,claim_thb_str:"",claim_thb_minor:null,vendor:"",notes:"",tags:[]}:{amount_str:d.amount_str||"",amount_minor:d.amount_minor,currency:d.currency,claim_thb_str:d.claim_thb_str||"",claim_thb_minor:d.claim_thb_minor,vendor:d.vendor||"",notes:d.notes||"",tags:[...(d.tags||[])]};
+  if(!d._travelDraft)d._travelDraft=isTravel?{initialized:true,travel_preset_id:d.travel_preset_id,travel_destination:d.travel_destination||d.location_label||"",travel_distance_km:d.travel_distance_km,travel_fuel_rate_minor:d.travel_fuel_rate_minor,travel_fuel_minor:d.travel_fuel_minor,travel_toll_minor:d.travel_toll_minor,travel_total_minor:d.travel_total_minor??d.amount_minor,location_lat:d.location_lat,location_lng:d.location_lng}:{initialized:false,travel_preset_id:null,travel_destination:"",travel_distance_km:null,travel_fuel_rate_minor:state.fuelRateMinor,travel_fuel_minor:0,travel_toll_minor:0,travel_total_minor:0,location_lat:null,location_lng:null};
   const body=`
   <div class="cform">
     <div class="lrow">
@@ -1124,15 +1149,19 @@ function renderEntryFormCompact(allTags, isEdit){
       <div class="lctl"><input type="text" id="cVendor" placeholder="Who you paid" value="${esc(d.vendor)}"></div>
     </div>
 
-    <div class="lrow tall ${isTravel?"":"hidden"}" id="cLocCell">
-      <label>Location <span class="opt">(pin)</span></label>
-      <div class="lctl"><div class="loc-inline">
-        <button class="btn btn-ghost btn-sm" id="cPin" style="flex:1;">&#128205; <span id="cPinTxt">${d.location_lat!=null?"Pinned":"Pin"}</span></button>
-        <input type="text" id="cLocLabel" placeholder="Label" value="${esc(d.location_label)}" style="flex:1;">
-      </div></div>
+    <div id="cTravelFields" class="${isTravel?"":"hidden"}">
+      <div class="lrow"><label>Destination</label><div class="lctl"><select id="cDestination"><option value="">Custom destination</option>${state.destinations.map(p=>`<option value="${p.id}" ${p.id===d.travel_preset_id?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div></div>
+      <div class="lrow"><label>Name <span class="req">*</span></label><div class="lctl"><input type="text" id="cTravelName" value="${esc(d.travel_destination||d.location_label||"")}" placeholder="Destination name"></div></div>
+      <div class="lrow"><label>Total distance</label><div class="lctl"><input type="number" inputmode="decimal" id="cDistance" min="0" step="0.1" value="${d.travel_distance_km??""}" placeholder="km"></div></div>
+      <div class="lrow"><label>Fuel rate</label><div class="lctl"><input type="number" inputmode="decimal" id="cFuelRate" min="0" step="0.01" value="${d.travel_fuel_rate_minor!=null?(d.travel_fuel_rate_minor/100).toFixed(2):""}" placeholder="THB/km"></div></div>
+      <div class="lrow"><label>Fuel amount</label><div class="lctl travel-calc" id="cFuelAmount">${money(d.travel_fuel_minor||0,"THB")}</div></div>
+      <div class="lrow"><label>Toll</label><div class="lctl"><input type="number" inputmode="decimal" id="cToll" min="0" step="0.01" value="${((d.travel_toll_minor||0)/100).toFixed(2)}"></div></div>
+      <div class="lrow"><label>Total amount</label><div class="lctl travel-calc" id="cTravelTotal">${money(d.travel_total_minor??d.amount_minor??0,"THB")}</div></div>
+      ${isEdit&&d.travel_fuel_rate_minor!==state.fuelRateMinor?`<button type="button" class="rate-action" id="cUseCurrent">Use current rate · ${money(state.fuelRateMinor,"THB")}/km</button>`:""}
+      <div class="lrow tall"><label>Map pin <span class="opt">(optional)</span></label><div class="lctl"><div class="loc-inline"><button class="btn btn-ghost btn-sm" id="cPin" style="flex:1;">&#128205; <span id="cPinTxt">${d.location_lat!=null?"Pinned":"Use current location"}</span></button><button class="btn btn-ghost btn-sm" id="cClearPin">Clear</button></div></div></div>
     </div>
 
-    <div class="lrow">
+    <div class="lrow ${isTravel?"hidden":""}" id="cAmountCell">
       <label id="cAmtLabel">${isTravel?'Toll <span class="opt">(opt)</span>':'Amount <span class="req">*</span>'}</label>
       <div class="lctl"><div class="amount-row">
         <input type="text" inputmode="decimal" id="cAmount" placeholder="0.00" value="${esc(d.amount_str||"")}">
@@ -1181,9 +1210,9 @@ function wireCompactForm(screen,isEdit){
     q("#cVendorCell").classList.toggle("hidden",isTravel);
     q("#cNotesCell").classList.toggle("hidden",isTravel);
     q("#cTagsCell").classList.toggle("hidden",isTravel);
-    q("#cLocCell").classList.toggle("hidden",!isTravel);
-    q("#cAmtLabel").innerHTML=isTravel?'Toll <span class="opt">(opt)</span>':'Amount <span class="req">*</span>';
-    q("#cAmount").placeholder=isTravel?"0.00 (optional)":"0.00";
+    q("#cTravelFields").classList.toggle("hidden",!isTravel);
+    q("#cAmountCell").classList.toggle("hidden",isTravel);
+    q("#cAmtLabel").innerHTML='Amount <span class="req">*</span>';
   }
   // Tag usage stats for the picker's sort options.
   const tagFreq={}, tagLastUsed={};
@@ -1239,11 +1268,27 @@ function wireCompactForm(screen,isEdit){
     $$(".proof-thumb .del",pl).forEach(x=>x.addEventListener("click",()=>{d._proofs.splice(+x.dataset.i,1);renderProofs();}));
     $$(".proof-thumb img",pl).forEach(im=>{ im.style.cursor="pointer"; im.addEventListener("click",()=>viewImage(im.src)); });
   }
-  function syncClaimThb(){ const cell=q("#cClaimThbCell"); if(cell) cell.classList.toggle("hidden", q("#cCur").value==="THB"); }
+  function syncClaimThb(){const cell=q("#cClaimThbCell");if(!cell)return;const currency=q("#cCur")?.value||d.currency;cell.classList.toggle("hidden",d.type==="travel"||currency==="THB");}
   q("#cCompany").addEventListener("change",e=>{d.company_id=e.target.value;const c=state.companies.find(x=>x.id===d.company_id);if(c&&c.default_currency){d.currency=c.default_currency;q("#cCur").value=c.default_currency;syncClaimThb();}});
   q("#cCur").addEventListener("change",()=>{ d.currency=q("#cCur").value; syncClaimThb(); });
-  q("#cType").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;d.type=b.dataset.t;$$("#cType button",screen).forEach(x=>x.classList.toggle("on",x===b));applyType();});
+  q("#cType").addEventListener("click",e=>{const b=e.target.closest("button");if(!b||b.dataset.t===d.type)return;
+    if(d.type==="expense")d._expenseDraft={amount_str:q("#cAmount").value,amount_minor:d.amount_minor,currency:q("#cCur").value,claim_thb_str:q("#cClaimThb").value,claim_thb_minor:d.claim_thb_minor,vendor:q("#cVendor").value,notes:q("#cNotes").value,tags:[...d.tags]};
+    else{readTravelCalc();d._travelDraft={initialized:true,travel_preset_id:d.travel_preset_id,travel_destination:d.travel_destination,travel_distance_km:d.travel_distance_km,travel_fuel_rate_minor:d.travel_fuel_rate_minor,travel_fuel_minor:d.travel_fuel_minor,travel_toll_minor:d.travel_toll_minor,travel_total_minor:d.travel_total_minor,location_lat:d.location_lat,location_lng:d.location_lng};}
+    d.type=b.dataset.t;
+    if(d.type==="travel"){
+      if(!d._travelDraft.initialized){const def=state.destinations.find(x=>x.is_default);if(def)applyDestination(d,def);else{d.travel_preset_id=null;d.travel_destination="";d.travel_distance_km=null;d.travel_fuel_rate_minor=state.fuelRateMinor;d.travel_toll_minor=0;d.location_lat=null;d.location_lng=null;recalcTravel(d);}d._travelDraft={initialized:true,travel_preset_id:d.travel_preset_id,travel_destination:d.travel_destination,travel_distance_km:d.travel_distance_km,travel_fuel_rate_minor:d.travel_fuel_rate_minor,travel_fuel_minor:d.travel_fuel_minor,travel_toll_minor:d.travel_toll_minor,travel_total_minor:d.travel_total_minor,location_lat:d.location_lat,location_lng:d.location_lng};}
+      Object.assign(d,d._travelDraft);d.currency="THB";d.location_label=d.travel_destination;q("#cDestination").value=d.travel_preset_id||"";q("#cTravelName").value=d.travel_destination||"";q("#cDistance").value=d.travel_distance_km??"";q("#cFuelRate").value=d.travel_fuel_rate_minor==null?"":(d.travel_fuel_rate_minor/100).toFixed(2);q("#cToll").value=((d.travel_toll_minor||0)/100).toFixed(2);q("#cFuelAmount").textContent=money(d.travel_fuel_minor||0,"THB");q("#cTravelTotal").textContent=money(d.travel_total_minor||0,"THB");q("#cPinTxt").textContent=d.location_lat!=null?"Pinned":"Use current location";
+    }else{
+      Object.assign(d,d._expenseDraft);d.location_lat=null;d.location_lng=null;d.location_label="";q("#cAmount").value=d.amount_str||"";q("#cCur").value=d.currency;q("#cClaimThb").value=d.claim_thb_str||"";q("#cVendor").value=d.vendor||"";q("#cNotes").value=d.notes||"";renderTags();syncClaimThb();
+    }
+    $$("#cType button",screen).forEach(x=>x.classList.toggle("on",x===b));applyType();syncClaimThb();
+  });
+  function readTravelCalc(){d.travel_destination=q("#cTravelName").value.trim();d.location_label=d.travel_destination;d.travel_distance_km=q("#cDistance").value===""?null:Math.round(Number(q("#cDistance").value)*10)/10;d.travel_fuel_rate_minor=q("#cFuelRate").value===""?null:Math.round(Number(q("#cFuelRate").value)*100);d.travel_toll_minor=Math.max(0,Math.round(Number(q("#cToll").value||0)*100));recalcTravel(d);q("#cFuelAmount").textContent=money(d.travel_fuel_minor,"THB");q("#cTravelTotal").textContent=money(d.travel_total_minor,"THB");}
+  q("#cDestination").addEventListener("change",e=>{const p=state.destinations.find(x=>x.id===e.target.value);if(p){applyDestination(d,p);q("#cTravelName").value=d.travel_destination;q("#cDistance").value=d.travel_distance_km??"";q("#cFuelRate").value=(d.travel_fuel_rate_minor/100).toFixed(2);q("#cToll").value=(d.travel_toll_minor/100).toFixed(2);q("#cPinTxt").textContent=d.location_lat!=null?"Pinned":"Use current location";readTravelCalc();}else d.travel_preset_id=null;});
+  ["#cDistance","#cFuelRate","#cToll"].forEach(sel=>q(sel).addEventListener("input",readTravelCalc));
+  q("#cUseCurrent")?.addEventListener("click",()=>{q("#cFuelRate").value=(state.fuelRateMinor/100).toFixed(2);readTravelCalc();});
   q("#cPin").addEventListener("click",()=>{if(!navigator.geolocation){toast("Geolocation not available");return;}q("#cPinTxt").textContent="Locating\u2026";navigator.geolocation.getCurrentPosition(pos=>{d.location_lat=pos.coords.latitude;d.location_lng=pos.coords.longitude;q("#cPinTxt").textContent="Pinned";toast("Location pinned");},()=>{q("#cPinTxt").textContent="Pin location";toast("Location permission denied");},{enableHighAccuracy:true,timeout:10000});});
+  q("#cClearPin").addEventListener("click",()=>{d.location_lat=null;d.location_lng=null;q("#cPinTxt").textContent="Use current location";});
   q("#cTagsOpen").addEventListener("click",openTagPicker);
   q("#cFile").addEventListener("change",function(){ const files=[...this.files]; this.value=""; ingestProofs(files, renderProofs); });
   const cAmt=q("#cAmount");
@@ -1268,8 +1313,10 @@ function wireCompactForm(screen,isEdit){
     const amt=parseFloat(d.amount_str.replace(/,/g,""));
     if(!d.company_id){toast("Choose a company");return;}
     if(isTravel){
-      if(d.location_lat==null){toast("Pin a location for travel");return;}
-      d.amount_minor=(amt&&amt>0)?Math.round(amt*100):0;
+      readTravelCalc();
+      if(!d.travel_destination){toast("Enter a destination");return;}
+      if(d.travel_distance_km==null||d.travel_distance_km<0){toast("Enter total distance");return;}
+      if(!Number.isSafeInteger(d.travel_fuel_rate_minor)||d.travel_fuel_rate_minor<0){toast("Enter a valid fuel rate");return;}
       d.vendor="";d.notes="";d.tags=[];
     }else{
       if(!amt||amt<=0){toast("Enter an amount");return;}
@@ -1286,7 +1333,7 @@ function wireCompactForm(screen,isEdit){
 }
 
 async function openDetail(id){
-  const e=state.entries.find(x=>x.id===id);if(!e)return;
+  const found=state.entries.find(x=>x.id===id);if(!found)return;const e=normalizeTravel(found);
   const proofs=await DB.getByIndex("proofs","entry_id",id);
   const edits=(await DB.getByIndex("edits","entry_id",id)).sort((a,b)=>b.edited_at-a.edited_at);
   const bes=await DB.getByIndex("batch_entries","entry_id",id);
@@ -1301,7 +1348,13 @@ async function openDetail(id){
     ["Type",e.type[0].toUpperCase()+e.type.slice(1)],
     e.vendor?["Vendor",e.vendor]:null,
     ["Date",fmtDate(e.payment_date)],
-    e.type==="travel"&&e.location_lat!=null?["Location",(e.location_label?e.location_label+" · ":"")+`${e.location_lat.toFixed(4)}, ${e.location_lng.toFixed(4)}`]:null,
+    e.type==="travel"?["Destination",e.travel_destination||e.location_label||"—"]:null,
+    e.type==="travel"?["Total distance",e.travel_distance_km==null?"—":`${e.travel_distance_km} km`]:null,
+    e.type==="travel"?["Fuel rate",e.travel_fuel_rate_minor==null?"—":`${money(e.travel_fuel_rate_minor,"THB")}/km`]:null,
+    e.type==="travel"?["Fuel amount",e.travel_fuel_minor==null?"—":money(e.travel_fuel_minor,"THB")]:null,
+    e.type==="travel"?["Toll",e.travel_toll_minor==null?"—":money(e.travel_toll_minor,"THB")]:null,
+    e.type==="travel"?["Total amount",money(e.travel_total_minor??e.amount_minor,"THB")]:null,
+    e.type==="travel"&&e.location_lat!=null?["Map pin",`${e.location_lat.toFixed(4)}, ${e.location_lng.toFixed(4)}`]:null,
     e.tags&&e.tags.length?["Tags",e.tags.join(", ")]:null,
     e.notes?["Notes",e.notes]:null,
   ].filter(Boolean);
@@ -1317,8 +1370,8 @@ async function openDetail(id){
 
   const body=`
     <div class="det-amt">
-      <span class="n">${e.type==='travel'&&e.amount_minor===0?'No toll':money(e.amount_minor,e.currency)}</span>
-      <div class="cur">${e.type==='travel'?(e.amount_minor===0?'Travel':e.currency+' · toll'):e.currency}</div>
+      <span class="n">${e.type==='travel'&&e.amount_minor===0?'—':money(e.amount_minor,e.currency)}</span>
+      <div class="cur">${e.type==='travel'?'Travel':e.currency}</div>
     </div>
     <div class="status-line"><span class="status-tag ${statusClass}">${STATUS_LABEL[e.status]}</span></div>
 
@@ -1353,7 +1406,7 @@ async function openDetail(id){
 
 function fmtDateTime(ts){const d=new Date(ts);const dd=String(d.getDate()).padStart(2,"0");const mm=String(d.getMonth()+1).padStart(2,"0");return `${dd}/${mm}/${d.getFullYear()}, `+d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});}
 function summarizeChanges(ch){
-  const names={amount_minor:"amount",currency:"currency",vendor:"vendor",payment_date:"date",notes:"notes",company_id:"company",type:"type",location_label:"location",tags:"tags"};
+  const names={amount_minor:"amount",currency:"currency",vendor:"vendor",payment_date:"date",notes:"notes",company_id:"company",type:"type",location_label:"location",tags:"tags",travel_destination:"destination",travel_distance_km:"total distance",travel_fuel_rate_minor:"fuel rate",travel_fuel_minor:"fuel amount",travel_toll_minor:"toll",travel_total_minor:"total amount",location_lat:"map pin",location_lng:"map pin"};
   return Object.keys(ch).map(k=>{
     if(k==="amount_minor")return `amount → changed`;
     if(k==="company_id")return `company → changed`;
@@ -1412,7 +1465,7 @@ async function renderClaim(){
     return `<div class="claim-row ${sel?'sel':''}" data-id="${e.id}">
       <div class="cbox">${sel?'✓':''}</div>
       <div class="info">
-        <div class="t">${esc(e.vendor||companyName(e.company_id))} ${noProof?'<span class="noproof">⚠</span>':''}</div>
+        <div class="t">${esc(entryDisplayName(e))} ${noProof?'<span class="noproof">⚠</span>':''}</div>
         <div class="s">${fmtDateShort(e.payment_date)} · ${STATUS_LABEL[e.status]}${e.status!=="unclaimed"?" (already)":""}</div>
       </div>
       <div class="a">${amountMainHTML(e)}</div>
@@ -1480,11 +1533,13 @@ function validISODate(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v||""))return false;cons
 function claimError(message,entryId){const e=new Error(message);e.code="CLAIM_INVALID";e.entryId=entryId||null;return e;}
 function auditFail(step){if(window.__claimsTestFailAt===step)throw new Error(`Injected failure: ${step}`);}
 function snapshotFromEntry(e,company){
+  e=normalizeTravel(e);
   const thb=e.currency==="THB"?e.amount_minor:e.claim_thb_minor;
   return {amount_minor_snapshot:thb,currency_snapshot:"THB",original_amount_minor:e.amount_minor,original_currency:e.currency,
     company_id_snapshot:e.company_id,vendor_snapshot:e.vendor||company?.name||"",date_snapshot:e.payment_date,type_snapshot:e.type,
     notes_snapshot:e.notes||"",tags_snapshot:[...(e.tags||[])],location_label_snapshot:e.location_label||"",
-    location_lat_snapshot:e.location_lat??null,location_lng_snapshot:e.location_lng??null};
+    location_lat_snapshot:e.location_lat??null,location_lng_snapshot:e.location_lng??null,
+    travel_destination_snapshot:e.type==="travel"?e.travel_destination||e.location_label||"":null,travel_distance_km_snapshot:e.type==="travel"?e.travel_distance_km:null,travel_fuel_rate_minor_snapshot:e.type==="travel"?e.travel_fuel_rate_minor:null,travel_fuel_minor_snapshot:e.type==="travel"?e.travel_fuel_minor:null,travel_toll_minor_snapshot:e.type==="travel"?e.travel_toll_minor:null,travel_total_minor_snapshot:e.type==="travel"?e.travel_total_minor??e.amount_minor:null,travel_preset_id_snapshot:e.type==="travel"?e.travel_preset_id:null};
 }
 function snapshotComparison(entry,be,company){
   const current=snapshotFromEntry(entry,company),changed=[];
@@ -1503,6 +1558,12 @@ function snapshotComparison(entry,be,company){
     ["Travel location",be.location_label_snapshot,current.location_label_snapshot,eq],
     ["Travel latitude",be.location_lat_snapshot,current.location_lat_snapshot,eq],
     ["Travel longitude",be.location_lng_snapshot,current.location_lng_snapshot,eq],
+    ["Travel destination",be.travel_destination_snapshot,current.travel_destination_snapshot,eq],
+    ["Travel total distance",be.travel_distance_km_snapshot,current.travel_distance_km_snapshot,eq],
+    ["Travel fuel rate",be.travel_fuel_rate_minor_snapshot,current.travel_fuel_rate_minor_snapshot,eq],
+    ["Travel fuel amount",be.travel_fuel_minor_snapshot,current.travel_fuel_minor_snapshot,eq],
+    ["Travel toll",be.travel_toll_minor_snapshot,current.travel_toll_minor_snapshot,eq],
+    ["Travel total amount",be.travel_total_minor_snapshot,current.travel_total_minor_snapshot,eq],
   ];
   for(const [label,oldValue,newValue,compare] of checks){if(oldValue!==undefined&&!compare(oldValue,newValue))changed.push(label);}
   return {matches:changed.length===0,changedFields:changed,currentSnapshot:current};
@@ -1575,13 +1636,13 @@ async function generateBatch(list,screen){
 /* ============================================================
    BATCHES + reimbursement
    ============================================================ */
-let showCancelledClaims=false;
 async function openBatchesTab(){
-  const batches=(await DB.getAll("batches")).sort((a,b)=>b.created_at-a.created_at);
+  const batches=await DB.getAll("batches");
   const bes=await DB.getAll("batch_entries");
   const byBatch={};bes.forEach(be=>{(byBatch[be.batch_id]=byBatch[be.batch_id]||[]).push(be);});
 
-  const active=batches.filter(b=>b.status!=="cancelled"),cancelled=batches.filter(b=>b.status==="cancelled");
+  const activity=b=>b.status==="cancelled"?(b.cancelled_at||b.created_at):(Date.parse(b.submitted_date)||b.created_at),sort=(a,b)=>activity(b)-activity(a)||(b.created_at||0)-(a.created_at||0);
+  const active=batches.filter(b=>b.status!=="cancelled").sort(sort),cancelled=batches.filter(b=>b.status==="cancelled").sort(sort);
   const cards=list=>list.map(b=>{
     const items=byBatch[b.id]||[];
     const amounts=batchAmounts(items);
@@ -1590,31 +1651,22 @@ async function openBatchesTab(){
     const rejected=items.filter(i=>i.outcome==="rejected").length;
     let statusTag,cls;
     if(b.status==="cancelled"){statusTag="Cancelled";cls="st-unclaimed-c";}
+    else if(reimbursed>0&&(pending>0||rejected>0)){statusTag="Partly reimbursed";cls="st-submitted-c";}
     else if(pending>0){statusTag="Outstanding";cls="st-submitted-c";}
-    else if(rejected>0&&reimbursed>0){statusTag="Partly reimbursed";cls="st-submitted-c";}
     else if(reimbursed>0){statusTag="Reimbursed";cls="st-reimbursed-c";}
     else{statusTag="Closed";cls="st-unclaimed-c";}
-    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${b.id}">
-      <div class="bh"><span class="bt">${esc(companyName(b.company_id))}</span><span class="bd">${fmtDateShort(b.submitted_date)}</span></div>
-      <div class="bd mono" style="margin-top:2px;font-weight:600;color:var(--ink-soft);">${esc(b.claim_no||"")}</div>
-      <div class="bd" style="margin-top:3px;">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)} · ${items.length} item${items.length!==1?"s":""}</div>
-      <div style="margin-top:8px;font-family:var(--mono);font-weight:600;">${amountLine(amounts.submitted)}</div>
-      ${b.status==="cancelled"?`<div class="bd" style="margin-top:3px;">Cancelled ${fmtDateShort(new Date(b.cancelled_at).toISOString().slice(0,10))}</div>`:""}
-      <div class="bstat"><span class="mini-tag ${cls}">${statusTag}</span>
-        ${pending?`<span class="mini-tag st-submitted-c">${pending} pending</span>`:""}
-        ${reimbursed?`<span class="mini-tag st-reimbursed-c">${reimbursed} paid</span>`:""}
-        ${rejected?`<span class="mini-tag st-rejected-c">${rejected} rejected</span>`:""}
-      </div>
-    </div>`;
+    const outcome=[pending&&`${pending} pending`,reimbursed&&`${reimbursed} paid`,rejected&&`${rejected} rejected`].filter(Boolean).join(" · ")||"—";
+    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${b.id}"><div class="batch-card-grid"><div class="left claim-line">${fmtDateShort(b.submitted_date)} · <span class="mono">${esc(b.claim_no||"")}</span></div><div class="right total">${amountLine(amounts.submitted)}</div><div class="left">${esc(companyName(b.company_id))} · ${items.length} item${items.length!==1?"s":""}</div><div class="right ${cls}">${statusTag}</div><div class="left">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)}</div><div class="right outcomes">${outcome}</div></div></div>`;
   }).join("");
   let body;
   if(batches.length===0){
     body=`<div class="empty"><h3>No claims yet</h3><p>Build a claim from the Claim tab to submit expenses together.</p></div>`;
   }else{
-    body=`<div class="batch-section-title">Active claims</div>${active.length?cards(active):`<div class="empty" style="padding:30px 20px;"><h3>No active claims</h3><p>Cancelled claims remain available below.</p></div>`}${cancelled.length?`<button class="btn btn-ghost" id="toggleCancelled" style="margin:16px 0;">${showCancelledClaims?"Hide":"Show"} cancelled claims</button>`:""}${showCancelledClaims&&cancelled.length?`<div class="batch-section-title">Cancelled claims</div>${cards(cancelled)}`:""}`;
+    const labels={active:"Active claims",cancelled:"Cancelled claims",all:"All claims"},list=state.batchFilter==="active"?active:state.batchFilter==="cancelled"?cancelled:[...batches].sort(sort);
+    body=`<button class="chip batch-filter active" id="batchFilter">${labels[state.batchFilter]} ▾</button>${list.length?cards(list):`<div class="empty" style="padding:30px 20px;"><h3>No ${labels[state.batchFilter].toLowerCase()}</h3></div>`}`;
   }
   const sc=openScreen("Claims", body);
-  sc.querySelector("#toggleCancelled")?.addEventListener("click",()=>{showCancelledClaims=!showCancelledClaims;closeScreen(sc);setTimeout(openBatchesTab,260);});
+  sc.querySelector("#batchFilter")?.addEventListener("click",()=>chooseSheet("Show claims",[{value:"active",label:"Active claims"},{value:"cancelled",label:"Cancelled claims"},{value:"all",label:"All claims"}],state.batchFilter,v=>{state.batchFilter=v;closeScreen(sc);setTimeout(openBatchesTab,260);}));
   sc.querySelectorAll(".batch-card").forEach(c=>c.addEventListener("click",()=>{closeScreen(sc);setTimeout(()=>openBatchDetail(c.dataset.id),260);}));
 }
 
@@ -1631,7 +1683,7 @@ async function openBatchDetail(batchId){
     const ocLabel={pending:"Pending",reimbursed:"Reimbursed",rejected:"Rejected → unclaimed"}[oc];
     return `<div class="claim-row" data-be="${be.id}" data-entry="${be.entry_id}" style="cursor:${isCancelled?"default":"pointer"};">
       <div class="info">
-        <div class="t">${esc(be.vendor_snapshot)}</div>
+        <div class="t">${esc(snapshotDisplayName(be))}</div>
         <div class="s">${fmtDateShort(be.date_snapshot)} · <span class="mini-tag ${ocClass}">${ocLabel}</span>${cmp&&!cmp.matches?` · <span class="mini-tag st-rejected-c">Log changed: ${esc(cmp.changedFields.join(", "))}</span>`:""}</div>
       </div>
       <div class="a">${money(be.amount_minor_snapshot,be.currency_snapshot)}</div>
@@ -1739,7 +1791,7 @@ async function synchronizeAndSetOutcomeAtomic({batchId,batchEntryId,expectedOutc
 async function reimburseBatchWithSyncAtomic(batchId,date,slipUrl,slipType,expectedMismatches,expectedSnapshots){
   return DB.runTransaction(["companies","batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
     const {batch,items,entries}=await readBatchLifecycle(s,req,batchId),now=Date.now();if(!validISODate(date))throw lifecycleError("Choose a valid reimbursement date");const company=await req(s.companies.get(batch.company_id)),actual={};
-    for(const be of items){const entry=entries.get(be.entry_id);if(be.outcome!=="pending"||entry.status!=="submitted")throw lifecycleError("Every claim item must still be pending");if(entry.company_id!==batch.company_id)throw lifecycleError(`${be.vendor_snapshot} belongs to another company`);const cmp=snapshotComparison(entry,be,company);if(!cmp.matches)actual[be.id]=cmp.changedFields;}
+    for(const be of items){const entry=entries.get(be.entry_id);if(be.outcome!=="pending"||entry.status!=="submitted")throw lifecycleError("Every claim item must still be pending");if(entry.company_id!==batch.company_id)throw lifecycleError(`${snapshotDisplayName(be)} belongs to another company`);const cmp=snapshotComparison(entry,be,company);if(!cmp.matches)actual[be.id]=cmp.changedFields;}
     const expected=expectedMismatches||{},actualIds=Object.keys(actual).sort(),expectedIds=Object.keys(expected).sort();if(JSON.stringify(actualIds)!==JSON.stringify(expectedIds)||actualIds.some(id=>!sameChangedFields(actual[id],expected[id])))throw lifecycleError("Claim items changed again — review them and retry");for(const id of actualIds){if(expectedSnapshots?.[id]){const be=items.find(x=>x.id===id),cmp=snapshotComparison(entries.get(be.entry_id),be,company);if(snapshotToken(cmp.currentSnapshot)!==snapshotToken(expectedSnapshots[id]))throw lifecycleError("A Log entry changed again — review the batch and retry");}}
     let firstSync=true,firstItem=true;for(const be of items){const entry=entries.get(be.entry_id),fields=actual[be.id];if(fields){const cmp=snapshotComparison(entry,be,company);applyCurrentSnapshot(be,cmp.currentSnapshot);be.synced_at=now;be.synced_fields=fields;await req(s.batch_entries.put(be));if(firstSync){auditFail("reimburse-all-sync-after-first-snapshot");firstSync=false;}}be.outcome="reimbursed";be.outcome_updated_at=now;await req(s.batch_entries.put(be));if(firstItem){auditFail("reimburse-all-sync-after-first-item");auditFail("reimburse-after-first-item");}entry.status="reimbursed";entry.updated_at=now;await req(s.entries.put(entry));if(firstItem){auditFail("reimburse-all-sync-after-first-entry");auditFail("reimburse-after-first-entry");firstItem=false;}}
     batch.reimbursed_date=date;batch.reimbursed_at=now;batch.reimburse_proof=slipUrl||null;batch.reimburse_proof_type=slipType||null;await req(s.batches.put(batch));auditFail("reimburse-all-sync-after-metadata");auditFail("reimburse-after-batch-metadata");
@@ -1805,7 +1857,7 @@ async function deleteEntryAtomic(id){
 // the batch record so it travels inside JSON backups.
 async function inspectBatchReimbursement(batchId){
   const batch=await DB.get("batches",batchId);if(!batch)throw lifecycleError("This claim no longer exists");if(batch.status==="cancelled")throw lifecycleError("This cancelled claim is read-only.");const items=await DB.getByIndex("batch_entries","batch_id",batchId),company=await DB.get("companies",batch.company_id),mismatches={},snapshots={},details=[];
-  for(const be of items){const entry=await DB.get("entries",be.entry_id);if(!entry)throw lifecycleError(`${be.vendor_snapshot}: Log entry is missing`);if(be.outcome!=="pending"||entry.status!=="submitted")throw lifecycleError("Every claim item must still be pending");if(entry.company_id!==batch.company_id)throw lifecycleError(`${be.vendor_snapshot}: company no longer matches the claim`);const cmp=snapshotComparison(entry,be,company);if(!cmp.matches){mismatches[be.id]=cmp.changedFields;snapshots[be.id]=cmp.currentSnapshot;details.push({label:entry.vendor||entry.location_label||be.vendor_snapshot,fields:cmp.changedFields});}}
+  for(const be of items){const entry=await DB.get("entries",be.entry_id);if(!entry)throw lifecycleError(`${snapshotDisplayName(be)}: Log entry is missing`);if(be.outcome!=="pending"||entry.status!=="submitted")throw lifecycleError("Every claim item must still be pending");if(entry.company_id!==batch.company_id)throw lifecycleError(`${snapshotDisplayName(be)}: company no longer matches the claim`);const cmp=snapshotComparison(entry,be,company);if(!cmp.matches){mismatches[be.id]=cmp.changedFields;snapshots[be.id]=cmp.currentSnapshot;details.push({label:entryDisplayName(entry)||snapshotDisplayName(be),fields:cmp.changedFields});}}
   return {mismatches,snapshots,details};
 }
 function reimburseBatchSheet(batchId,items,sc){
@@ -1920,12 +1972,12 @@ function promptClaimantName(onDone){
 async function exportClaimSheet(batchId){
   const batch=await DB.get("batches",batchId); if(!batch) return;
   if(!state.claimantName){ promptClaimantName(()=>exportClaimSheet(batchId)); return; }  // name required on the sheet
-  const items=await DB.getByIndex("batch_entries","batch_id",batchId);
+  const items=(await DB.getByIndex("batch_entries","batch_id",batchId)).sort((a,b)=>a.date_snapshot.localeCompare(b.date_snapshot));
   const tot={}; items.forEach(i=>tot[i.currency_snapshot]=(tot[i.currency_snapshot]||0)+i.amount_minor_snapshot);
   const urls=[];
-  let entriesHTML="", withProof=0;
-  for(let idx=0; idx<items.length; idx++){
-    const be=items[idx];
+  let entriesHTML="",travelProofHTML="",withProof=0,expenseNo=0,travelNo=0;
+  const travelRows=[],travelTotals={distance:0,fuel:0,toll:0,total:0};
+  for(const be of items){
     const live=state.entries.find(x=>x.id===be.entry_id);
     const proofs=await DB.getByIndex("proofs","entry_id",be.entry_id);
     const imgs=proofs.filter(p=>p.file_type&&p.file_type.startsWith("image"));
@@ -1935,6 +1987,13 @@ async function exportClaimSheet(batchId){
     if(pdfs.length) proofHTML+=`<div class="ppdf">${pdfs.length} PDF proof${pdfs.length>1?"s":""} attached (not shown)</div>`;
     if(imgs.length===0 && pdfs.length===0) proofHTML=`<div class="pproof-empty"></div>`;
     const snapshotType=be.type_snapshot??live?.type,type=snapshotType?snapshotType[0].toUpperCase()+snapshotType.slice(1):"";
+    if(snapshotType==="travel"){
+      travelNo++;const ref=`T${travelNo}`,dist=be.travel_distance_km_snapshot,rate=be.travel_fuel_rate_minor_snapshot,fuel=be.travel_fuel_minor_snapshot,toll=be.travel_toll_minor_snapshot,total=be.travel_total_minor_snapshot??be.amount_minor_snapshot,dest=be.travel_destination_snapshot??be.location_label_snapshot??be.vendor_snapshot??"—";
+      if(Number.isFinite(dist))travelTotals.distance+=dist;if(Number.isSafeInteger(fuel))travelTotals.fuel+=fuel;if(Number.isSafeInteger(toll))travelTotals.toll+=toll;if(Number.isSafeInteger(total))travelTotals.total+=total;
+      travelRows.push(`<tr><td>${ref}</td><td>${fmtDateShort(be.date_snapshot)}</td><td>${esc(dest)}</td><td class="num">${dist==null?"—":`${dist} km`}</td><td class="num">${rate==null?"—":`${money(rate,"THB")}/km`}</td><td class="num">${fuel==null?"—":money(fuel,"THB")}</td><td class="num">${toll?money(toll,"THB"):"—"}</td><td class="num">${money(total,"THB")}</td></tr>`);
+      if(imgs.length||pdfs.length)travelProofHTML+=`<div class="travel-proof"><h4>${ref} · ${fmtDateShort(be.date_snapshot)} · ${esc(dest)}</h4><div class="pproof">${proofHTML}</div></div>`;
+      continue;
+    }
     const snapshotTags=be.tags_snapshot??live?.tags??[],snapshotNotes=be.notes_snapshot??live?.notes??"";
     const rows=[
       ["Company",esc(companyName(batch.company_id))],
@@ -1946,9 +2005,9 @@ async function exportClaimSheet(batchId){
       snapshotNotes?["Notes",esc(snapshotNotes)]:null,
     ].filter(Boolean).map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
     const ocLabel={pending:"Pending",reimbursed:"Reimbursed",rejected:"Rejected"}[be.outcome]||"";
-    entriesHTML+=`<div class="pitem">
+    expenseNo++;entriesHTML+=`<div class="pitem">
       <div class="pcard">
-        <div class="pitem-no">Item ${idx+1}</div>
+        <div class="pitem-no">Item ${expenseNo}</div>
         <div class="pamt">${money(be.amount_minor_snapshot,be.currency_snapshot)}</div>
         <div class="pcur">${be.currency_snapshot}</div>
         ${ocLabel?`<div class="pstatus">${ocLabel}</div>`:""}
@@ -1957,6 +2016,7 @@ async function exportClaimSheet(batchId){
       <div class="pproof">${proofHTML}</div>
     </div>`;
   }
+  const travelHTML=travelRows.length?`<div class="psection-title">Travel</div><table class="ptravel"><thead><tr><th>Ref</th><th>Date</th><th>Destination</th><th class="num">Total distance</th><th class="num">Fuel rate</th><th class="num">Fuel amount</th><th class="num">Toll</th><th class="num">Total amount</th></tr></thead><tbody>${travelRows.join("")}<tr><th colspan="3">Totals</th><th class="num">${Math.round(travelTotals.distance*10)/10} km</th><th></th><th class="num">${money(travelTotals.fuel,"THB")}</th><th class="num">${money(travelTotals.toll,"THB")}</th><th class="num">${money(travelTotals.total,"THB")}</th></tr></tbody></table>${travelProofHTML?`<div class="psection-title">Travel proofs</div>${travelProofHTML}`:""}`:"";
   const totalHTML=Object.keys(tot).map(c=>money(tot[c],c)).join(" · ");
   const host=document.createElement("div");
   host.className="print-host";
@@ -1978,6 +2038,7 @@ async function exportClaimSheet(batchId){
         <tr><td>Receipts</td><td>${withProof} of ${items.length} have a receipt</td></tr>
       </table>
       ${entriesHTML}
+      ${travelHTML}
       <div class="ptotal">Total: ${totalHTML}</div>
     </div>`;
   document.body.appendChild(host);
@@ -1999,10 +2060,10 @@ function downloadFile(name,content,type){
 async function exportBatchCSV(batchId){
   const batch=await DB.get("batches",batchId);
   const items=await DB.getByIndex("batch_entries","batch_id",batchId);
-  const header=["Date","Vendor","Amount","Currency","Outcome"];
+  const header=["Date","Vendor","Amount","Currency","Outcome","Destination","Total distance","Fuel rate","Fuel amount","Toll","Total amount"];
   const lines=[header.join(",")];
   items.sort((a,b)=>a.date_snapshot.localeCompare(b.date_snapshot));
-  items.forEach(i=>lines.push([i.date_snapshot,csvEscape(i.vendor_snapshot),(i.amount_minor_snapshot/100).toFixed(2),i.currency_snapshot,i.outcome].join(",")));
+  items.forEach(i=>lines.push([i.date_snapshot,csvEscape(snapshotDisplayName(i)),(i.amount_minor_snapshot/100).toFixed(2),i.currency_snapshot,i.outcome,csvEscape(i.travel_destination_snapshot||""),i.travel_distance_km_snapshot??"",i.travel_fuel_rate_minor_snapshot==null?"":(i.travel_fuel_rate_minor_snapshot/100).toFixed(2),i.travel_fuel_minor_snapshot==null?"":(i.travel_fuel_minor_snapshot/100).toFixed(2),i.travel_toll_minor_snapshot==null?"":(i.travel_toll_minor_snapshot/100).toFixed(2),i.travel_total_minor_snapshot==null?"":(i.travel_total_minor_snapshot/100).toFixed(2)].join(",")));
   // totals
   const tot={};items.forEach(i=>tot[i.currency_snapshot]=(tot[i.currency_snapshot]||0)+i.amount_minor_snapshot);
   lines.push("");
@@ -2016,11 +2077,11 @@ async function exportBatchCSV(batchId){
 async function exportFilteredCSV(){
   const list=filteredEntries();
   if(list.length===0){toast("Nothing to export");return;}
-  const header=["Date","Company","Type","Vendor","Amount","Currency","Status","Tags","Notes"];
+  const header=["Date","Company","Type","Vendor","Amount","Currency","Status","Tags","Notes","Destination","Total distance","Fuel rate","Fuel amount","Toll","Total amount"];
   const lines=[header.join(",")];
   list.slice().reverse().forEach(e=>lines.push([
     e.payment_date,csvEscape(companyName(e.company_id)),e.type,csvEscape(e.vendor||""),
-    (e.amount_minor/100).toFixed(2),e.currency,e.status,csvEscape((e.tags||[]).join("; ")),csvEscape(e.notes||"")
+    (e.amount_minor/100).toFixed(2),e.currency,e.status,csvEscape((e.tags||[]).join("; ")),csvEscape(e.notes||""),csvEscape(e.travel_destination||e.location_label||""),e.travel_distance_km??"",e.travel_fuel_rate_minor==null?"":(e.travel_fuel_rate_minor/100).toFixed(2),e.travel_fuel_minor==null?"":(e.travel_fuel_minor/100).toFixed(2),e.travel_toll_minor==null?"":(e.travel_toll_minor/100).toFixed(2),e.travel_total_minor==null?"":(e.travel_total_minor/100).toFixed(2)
   ].join(",")));
   downloadFile(`ledger_export_${todayISO()}.csv`, lines.join("\n"),"text/csv");
   toast("CSV downloaded");
@@ -2101,6 +2162,7 @@ function openSettings(){
     <div class="list-choice">
       <button id="sName">Your name <span style="color:var(--slate);font-weight:600">${state.claimantName?esc(state.claimantName):"Not set"} ›</span></button>
       <button id="sCompanies">Companies <span class="check">›</span></button>
+      <button id="sDestinations">Destinations <span class="check">›</span></button>
       <button id="sCurrency">Default currency <span style="color:var(--slate);font-weight:600">${state.defaultCurrency} ›</span></button>
     </div>
 
@@ -2123,6 +2185,7 @@ function openSettings(){
   const sc=openScreen("More", body);
   sc.querySelector("#sName").addEventListener("click",()=>promptClaimantName(()=>{ closeScreen(sc); openSettings(); }));
   sc.querySelector("#sCompanies").addEventListener("click",()=>openCompanies(false));
+  sc.querySelector("#sDestinations").addEventListener("click",openDestinations);
   sc.querySelector("#sCurrency").addEventListener("click",()=>{
     chooseSheet("Default currency",CURRENCIES.map(c=>({value:c,label:c})),state.defaultCurrency,async v=>{
       state.defaultCurrency=v;await DB.put("meta",{k:"defaultCurrency",v});toast("Default set to "+v);closeScreen(sc);openSettings();
@@ -2130,12 +2193,23 @@ function openSettings(){
   });
   sc.querySelector("#sExportCsv").addEventListener("click",()=>{
     // export everything, ignoring filters
-    const saved={...state.filter};state.filter={company:null,status:null,from:null,to:null};
+    const saved={...state.filter,tags:[...(state.filter.tags||[])]};state.filter={company:null,status:null,from:null,to:null,q:"",tags:[]};
     exportFilteredCSV();state.filter=saved;
   });
   sc.querySelector("#sBackup").addEventListener("click",exportBackup);
   sc.querySelector("#sImport").addEventListener("click",importBackup);
   sc.querySelector("#sTesting").addEventListener("click",openTestingTools);
+}
+
+async function saveDestinations(){await DB.put("meta",{k:"travelDestinations",v:state.destinations.map(x=>({...x}))});}
+function openDestinations(){
+  const body=`<div class="hint" style="margin-bottom:12px;">Current global fuel rate: <strong>${money(state.fuelRateMinor,"THB")}/km</strong></div><div id="destList">${state.destinations.length?state.destinations.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<div class="sum-card dest-card" data-id="${p.id}"><h4>${esc(p.name)} ${p.is_default?'<span style="color:var(--jade);font-weight:500;">· Default</span>':''}</h4><div class="sum-row"><span>Total distance</span><span class="v">${p.distance_km} km</span></div><div class="sum-row"><span>Fuel rate</span><span class="v">${money(p.fuel_rate_minor,"THB")}/km</span></div><div class="sum-row"><span>Total amount</span><span class="v">${money(travelFuelMinor(p.distance_km,p.fuel_rate_minor)+(p.toll_minor||0),"THB")}</span></div><div class="dest-actions"><button class="btn btn-ghost btn-sm" data-edit="${p.id}">Edit</button><button class="btn btn-ghost btn-sm" data-del="${p.id}">Delete</button></div></div>`).join(""):`<div class="empty" style="padding:30px;"><p>No destinations yet.</p></div>`}</div><button class="btn btn-primary" id="addDestination">Add destination</button>`;
+  const sc=openScreen("Destinations",body);sc.querySelector("#addDestination").addEventListener("click",()=>destinationForm(null,sc));sc.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>destinationForm(state.destinations.find(x=>x.id===b.dataset.edit),sc)));sc.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",async()=>{const id=b.dataset.del;if(state.entries.some(e=>e.travel_preset_id===id)){toast("This destination is used by an existing Travel entry and cannot be deleted.");return;}state.destinations=state.destinations.filter(x=>x.id!==id);await saveDestinations();closeScreen(sc);setTimeout(openDestinations,260);toast("Destination deleted");}));
+}
+function destinationForm(existing,parent){
+  const p=existing?{...existing}:{id:uid(),name:"",lat:null,lng:null,distance_km:0,fuel_rate_minor:state.fuelRateMinor,toll_minor:0,is_default:false};
+  openSheet(`<h3>${existing?"Edit":"New"} destination</h3><div class="field"><label>Destination name</label><input id="dpName" value="${esc(p.name)}"></div><div class="field"><label>Total distance (km)</label><input type="number" min="0" step="0.1" id="dpDistance" value="${p.distance_km}"></div><div class="field"><label>Fuel rate (THB/km)</label><input type="number" min="0" step="0.01" id="dpRate" value="${(p.fuel_rate_minor/100).toFixed(2)}"></div><div class="field"><label>Toll (THB, optional)</label><input type="number" min="0" step="0.01" id="dpToll" value="${(p.toll_minor/100).toFixed(2)}"></div><div class="field"><label><input type="checkbox" id="dpDefault" ${p.is_default?"checked":""}> Default destination</label></div><div class="field"><label>Map pin <span class="opt">(optional)</span></label><button class="btn btn-ghost btn-sm" id="dpPin">${p.lat!=null?"Replace current pin":"Use current location"}</button><button class="btn btn-ghost btn-sm" id="dpClearPin" style="margin-top:6px;">Clear pin</button><div class="hint" id="dpCoords">${p.lat!=null?`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`:"No coordinates"}</div></div><button class="btn btn-primary" id="dpSave">Save destination</button>`);
+  $("#dpPin").addEventListener("click",()=>navigator.geolocation?.getCurrentPosition(pos=>{p.lat=pos.coords.latitude;p.lng=pos.coords.longitude;$("#dpCoords").textContent=`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;},()=>toast("Location permission denied"),{enableHighAccuracy:true,timeout:10000}));$("#dpClearPin").addEventListener("click",()=>{p.lat=null;p.lng=null;$("#dpCoords").textContent="No coordinates";});$("#dpSave").addEventListener("click",async()=>{p.name=$("#dpName").value.trim();p.distance_km=Math.round(Number($("#dpDistance").value)*10)/10;p.fuel_rate_minor=Math.round(Number($("#dpRate").value)*100);p.toll_minor=Math.round(Number($("#dpToll").value||0)*100);p.is_default=$("#dpDefault").checked;if(!p.name||!Number.isFinite(p.distance_km)||p.distance_km<0||!Number.isSafeInteger(p.fuel_rate_minor)||p.fuel_rate_minor<0||!Number.isSafeInteger(p.toll_minor)||p.toll_minor<0){toast("Check the destination values");return;}if(p.is_default)state.destinations.forEach(x=>x.is_default=false);const i=state.destinations.findIndex(x=>x.id===p.id);if(i<0)state.destinations.push(p);else state.destinations[i]=p;state.fuelRateMinor=p.fuel_rate_minor;await Promise.all([saveDestinations(),DB.put("meta",{k:"travelFuelRateMinor",v:state.fuelRateMinor})]);closeSheet();if(parent)closeScreen(parent);setTimeout(openDestinations,260);toast("Destination saved");});
 }
 
 function openTestingTools(){
@@ -2192,6 +2266,8 @@ function canonicalDataURL(value,declaredType,total){
   let binary="";for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
   return `data:${m[1]};base64,${btoa(binary)}`;
 }
+function validCoordPair(lat,lng){return (lat==null&&lng==null)||(Number.isFinite(lat)&&lat>=-90&&lat<=90&&Number.isFinite(lng)&&lng>=-180&&lng<=180);}
+function validateTravelFields(x,suffix="",required=false){const g=n=>x[`travel_${n}${suffix}`];if(!required&&g("destination")==null&&g("distance_km")==null&&g("fuel_rate_minor")==null)return;if(g("destination")!=null&&!safeString(g("destination"),500))throw restoreError("Validating records","Invalid Travel destination");if(g("distance_km")!=null&&(!Number.isFinite(g("distance_km"))||g("distance_km")<0))throw restoreError("Validating records","Invalid Travel distance");for(const n of ["fuel_rate_minor","fuel_minor","toll_minor","total_minor"])if(g(n)!=null&&(!Number.isSafeInteger(g(n))||g(n)<0))throw restoreError("Validating records",`Invalid Travel ${n}`);if(g("preset_id")!=null&&!safeString(g("preset_id"),200))throw restoreError("Validating records","Invalid Travel preset reference");}
 function normalizeBackup(data){
   const stage="Validating records";if(!isPlainObject(data)||data.app!=="ledger")throw restoreError(stage,"Not a Claims backup");
   if(data.version!==2)throw restoreError(stage,data.version>2?"This backup was created by a newer Claims version":"This older backup version is not safely supported");
@@ -2201,12 +2277,13 @@ function normalizeBackup(data){
   const unique=(store,key)=>{if(typeof key!=="string"||!key||key.length>200)throw restoreError(stage,`Invalid key in ${store}`,store,key);if(seen[store].has(key))throw restoreError(stage,`Duplicate key '${key}' in ${store}; current data was not changed`,store,key);seen[store].add(key);};
   const currencies=new Set(["THB","RMB","USD"]),out={};
   out.companies=data.companies.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid company record","companies");unique("companies",x.id);if(!safeString(x.name,500)||!x.name.trim()||!currencies.has(x.default_currency)||typeof x.archived!=="boolean"||!finiteTime(x.created_at)||!/^#[0-9a-f]{6}$/i.test(x.color||"")||!/^[A-Z0-9]{1,6}$/.test(x.code||""))throw restoreError(stage,`Invalid company '${x.id}'`,"companies",x.id);return {...x,name:x.name.trim(),code:x.code.toUpperCase()};});
-  out.entries=data.entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid entry record","entries");unique("entries",x.id);if(typeof x.company_id!=="string"||!["expense","travel"].includes(x.type)||!Number.isSafeInteger(x.amount_minor)||x.amount_minor<0||!currencies.has(x.currency)||(x.claim_thb_minor!=null&&(!Number.isSafeInteger(x.claim_thb_minor)||x.claim_thb_minor<0))||!validISODate(x.payment_date)||!["unclaimed","submitted","reimbursed"].includes(x.status)||!safeString(x.vendor)||!safeString(x.notes)||!safeString(x.location_label||"")||!Array.isArray(x.tags)||x.tags.some(t=>!safeString(t,500))||!(x.location_lat==null&&x.location_lng==null)&&!(Number.isFinite(x.location_lat)&&x.location_lat>=-90&&x.location_lat<=90&&Number.isFinite(x.location_lng)&&x.location_lng>=-180&&x.location_lng<=180)||!finiteTime(x.created_at)||!finiteTime(x.updated_at,true))throw restoreError(stage,`Invalid entry '${x.id}'`,"entries",x.id);return {...x,tags:[...x.tags]};});
+  out.entries=data.entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid entry record","entries");unique("entries",x.id);if(typeof x.company_id!=="string"||!["expense","travel"].includes(x.type)||!Number.isSafeInteger(x.amount_minor)||x.amount_minor<0||!currencies.has(x.currency)||(x.claim_thb_minor!=null&&(!Number.isSafeInteger(x.claim_thb_minor)||x.claim_thb_minor<0))||!validISODate(x.payment_date)||!["unclaimed","submitted","reimbursed"].includes(x.status)||!safeString(x.vendor)||!safeString(x.notes)||!safeString(x.location_label||"")||!Array.isArray(x.tags)||x.tags.some(t=>!safeString(t,500))||!validCoordPair(x.location_lat,x.location_lng)||!finiteTime(x.created_at)||!finiteTime(x.updated_at,true))throw restoreError(stage,`Invalid entry '${x.id}'`,"entries",x.id);validateTravelFields(x);return {...x,tags:[...x.tags]};});
   out.tags=data.tags.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid tag record","tags");unique("tags",x.name);if(!safeString(x.name,500)||!x.name.trim()||!finiteTime(x.created_at,true))throw restoreError(stage,`Invalid tag '${x.name}'`,"tags",x.name);return {...x};});
   out.batches=data.batches.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch record","batches");unique("batches",x.id);if(typeof x.company_id!=="string"||!validISODate(x.submitted_date)||!validISODate(x.range_start)||!validISODate(x.range_end)||x.range_start>x.range_end||!safeString(x.note||"")||!finiteTime(x.created_at)||!safeString(x.claim_no,200)||!x.claim_no||(x.status!=null&&x.status!=="cancelled")||(x.status==="cancelled"&&!finiteTime(x.cancelled_at))||(x.status!=="cancelled"&&x.cancelled_at!=null)||(x.reimbursed_date!=null&&!validISODate(x.reimbursed_date))||!finiteTime(x.reimbursed_at,true))throw restoreError(stage,`Invalid batch '${x.id}'`,"batches",x.id);return {...x};});
-  out.batch_entries=data.batch_entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch entry record","batch_entries");unique("batch_entries",x.id);if(typeof x.batch_id!=="string"||typeof x.entry_id!=="string"||!Number.isSafeInteger(x.amount_minor_snapshot)||x.amount_minor_snapshot<0||!currencies.has(x.currency_snapshot)||(x.original_amount_minor!=null&&(!Number.isSafeInteger(x.original_amount_minor)||x.original_amount_minor<0))||(x.original_currency!=null&&!currencies.has(x.original_currency))||!safeString(x.vendor_snapshot)||!validISODate(x.date_snapshot)||!["pending","reimbursed","rejected"].includes(x.outcome)||!finiteTime(x.outcome_updated_at,true)||!finiteTime(x.synced_at,true)||(x.synced_fields!=null&&(!Array.isArray(x.synced_fields)||x.synced_fields.some(v=>!safeString(v,200))))||(x.company_id_snapshot!=null&&typeof x.company_id_snapshot!=="string")||(x.type_snapshot!=null&&!["expense","travel"].includes(x.type_snapshot))||(x.notes_snapshot!=null&&!safeString(x.notes_snapshot))||(x.tags_snapshot!=null&&(!Array.isArray(x.tags_snapshot)||x.tags_snapshot.some(v=>!safeString(v,500))))||(x.location_label_snapshot!=null&&!safeString(x.location_label_snapshot))||!((x.location_lat_snapshot==null&&x.location_lng_snapshot==null)||(Number.isFinite(x.location_lat_snapshot)&&x.location_lat_snapshot>=-90&&x.location_lat_snapshot<=90&&Number.isFinite(x.location_lng_snapshot)&&x.location_lng_snapshot>=-180&&x.location_lng_snapshot<=180)))throw restoreError(stage,`Invalid batch entry '${x.id}'`,"batch_entries",x.id);return {...x,...(x.tags_snapshot?{tags_snapshot:[...x.tags_snapshot]}:{})};});
+  out.batch_entries=data.batch_entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch entry record","batch_entries");unique("batch_entries",x.id);if(typeof x.batch_id!=="string"||typeof x.entry_id!=="string"||!Number.isSafeInteger(x.amount_minor_snapshot)||x.amount_minor_snapshot<0||!currencies.has(x.currency_snapshot)||(x.original_amount_minor!=null&&(!Number.isSafeInteger(x.original_amount_minor)||x.original_amount_minor<0))||(x.original_currency!=null&&!currencies.has(x.original_currency))||!safeString(x.vendor_snapshot)||!validISODate(x.date_snapshot)||!["pending","reimbursed","rejected"].includes(x.outcome)||!finiteTime(x.outcome_updated_at,true)||!finiteTime(x.synced_at,true)||(x.synced_fields!=null&&(!Array.isArray(x.synced_fields)||x.synced_fields.some(v=>!safeString(v,200))))||(x.company_id_snapshot!=null&&typeof x.company_id_snapshot!=="string")||(x.type_snapshot!=null&&!["expense","travel"].includes(x.type_snapshot))||(x.notes_snapshot!=null&&!safeString(x.notes_snapshot))||(x.tags_snapshot!=null&&(!Array.isArray(x.tags_snapshot)||x.tags_snapshot.some(v=>!safeString(v,500))))||(x.location_label_snapshot!=null&&!safeString(x.location_label_snapshot))||!validCoordPair(x.location_lat_snapshot,x.location_lng_snapshot))throw restoreError(stage,`Invalid batch entry '${x.id}'`,"batch_entries",x.id);validateTravelFields(x,"_snapshot");return {...x,...(x.tags_snapshot?{tags_snapshot:[...x.tags_snapshot]}:{})};});
   out.edits=data.edits.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid edit record","edits");unique("edits",x.id);if(typeof x.entry_id!=="string"||!finiteTime(x.edited_at)||!isPlainObject(x.changes)||Object.keys(x.changes).some(k=>["__proto__","prototype","constructor"].includes(k))||!(x.reason==null||safeString(x.reason)))throw restoreError(stage,`Invalid edit '${x.id}'`,"edits",x.id);return {...x,changes:{...x.changes}};});
   out.meta=data.meta.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid metadata record","meta");unique("meta",x.k);if(/^claimseq:/.test(x.k)&&(!Number.isSafeInteger(x.v)||x.v<0))throw restoreError(stage,`Invalid claim counter '${x.k}'`,"meta",x.k);try{structuredClone(x.v);}catch(e){throw restoreError(stage,`Unsupported metadata '${x.k}'`,"meta",x.k);}return {k:x.k,v:x.v};});
+  const rateMeta=out.meta.find(x=>x.k==="travelFuelRateMinor");if(rateMeta&&(!Number.isSafeInteger(rateMeta.v)||rateMeta.v<0))throw restoreError(stage,"Invalid global fuel rate","meta",rateMeta.k);const destMeta=out.meta.find(x=>x.k==="travelDestinations");if(destMeta){if(!Array.isArray(destMeta.v))throw restoreError(stage,"Invalid destination presets","meta",destMeta.k);const presetIds=new Set();let defaults=0;for(const p of destMeta.v){if(!isPlainObject(p)||!safeString(p.id,200)||!p.id||presetIds.has(p.id)||!safeString(p.name,500)||!p.name.trim()||!Number.isFinite(p.distance_km)||p.distance_km<0||!Number.isSafeInteger(p.fuel_rate_minor)||p.fuel_rate_minor<0||!Number.isSafeInteger(p.toll_minor)||p.toll_minor<0||!validCoordPair(p.lat,p.lng)||typeof p.is_default!=="boolean")throw restoreError(stage,"Invalid or duplicate destination preset","meta",destMeta.k);presetIds.add(p.id);if(p.is_default)defaults++;}if(defaults>1)throw restoreError(stage,"More than one default destination","meta",destMeta.k);}
   const total={value:0};out.proofs=data.proofs.map(x=>{if(!isPlainObject(x))throw restoreError("Validating receipts","Invalid proof record","proofs");unique("proofs",x.id);if(typeof x.entry_id!=="string"||!["image/jpeg","image/png","image/webp","application/pdf"].includes(x.file_type)||!safeString(x.name,500)||!finiteTime(x.added_at))throw restoreError("Validating receipts",`Invalid proof '${x.id}'`,"proofs",x.id);const bytes=strictBase64Bytes(x.data);if(bytes.length>MAX_ATTACHMENT)throw restoreError("Validating receipts",`Proof '${x.id}' exceeds 20 MiB`,"proofs",x.id);if(!bytesMatchType(bytes,x.file_type))throw restoreError("Validating receipts",`Proof '${x.id}' MIME type does not match its content`,"proofs",x.id);total.value+=bytes.length;if(total.value>MAX_ATTACHMENTS_TOTAL)throw restoreError("Validating receipts","Decoded attachments exceed the 250 MiB backup limit");return {id:x.id,entry_id:x.entry_id,file_type:x.file_type,name:x.name.replace(/[\\/\x00-\x1f]/g,"_"),added_at:x.added_at,blob:new Blob([bytes],{type:x.file_type})};});
   for(const b of out.batches){b.reimburse_proof=canonicalDataURL(b.reimburse_proof,b.reimburse_proof_type,total);if(!b.reimburse_proof){delete b.reimburse_proof_type;}else b.reimburse_proof_type=b.reimburse_proof.slice(5,b.reimburse_proof.indexOf(";"));}
   const ids=n=>seen[n];for(const e of out.entries)if(!ids("companies").has(e.company_id))throw restoreError(stage,`Entry '${e.id}' references a missing company`);for(const p of out.proofs)if(!ids("entries").has(p.entry_id))throw restoreError(stage,`Proof '${p.id}' references a missing entry`);for(const b of out.batches)if(!ids("companies").has(b.company_id))throw restoreError(stage,`Batch '${b.id}' references a missing company`);for(const e of out.edits)if(!ids("entries").has(e.entry_id))throw restoreError(stage,`Edit '${e.id}' references a missing entry`);
@@ -2325,6 +2402,8 @@ async function seedExamples(){
   const cid=i=>comps[i%comps.length].id;
   await DB.bulkPut("tags",["Meals","Transport","Client","Software","Office","Utilities","Travel"].map(name=>({name})));
   const bkk={lat:13.7563,lng:100.5018};
+  const demoPreset={id:uid(),name:"Rayong Plant",lat:12.6814,lng:101.2816,distance_km:176,fuel_rate_minor:500,toll_minor:12000,is_default:true};
+  await DB.put("meta",{k:"travelFuelRateMinor",v:500});await DB.put("meta",{k:"travelDestinations",v:[demoPreset]});
   const samples=[
     [1,"expense","Cafe Amazon",185,"THB","unclaimed",["Meals"]],
     [2,"expense","Grab",240,"THB","unclaimed",["Transport"]],
@@ -2353,31 +2432,33 @@ async function seedExamples(){
     const dt=new Date(now-days*86400000);
     const iso=new Date(dt-dt.getTimezoneOffset()*60000).toISOString().slice(0,10);
     const isTravel=type==="travel";
-    return {id:uid(),company_id:cid(idx),type,amount_minor:Math.round(amt*100),currency:cur,
+    const distance=isTravel?(idx===2?176:idx===7?42:null):null,rate=isTravel?(idx===2?450:500):null,fuel=distance==null?0:travelFuelMinor(distance,rate),toll=isTravel?Math.round(amt*100):null,total=isTravel?(distance==null?Math.round(amt*100):fuel+toll):Math.round(amt*100);
+    return {id:uid(),company_id:cid(idx),type,amount_minor:total,currency:cur,claim_thb_minor:cur==="USD"?Math.round(amt*3600):cur==="RMB"?Math.round(amt*500):null,
       vendor:isTravel?"":vendor,payment_date:iso,notes:"",tags:tags||[],
       location_lat:isTravel?+(bkk.lat+(Math.random()-.5)*0.3).toFixed(5):null,
       location_lng:isTravel?+(bkk.lng+(Math.random()-.5)*0.3).toFixed(5):null,
       location_label:isTravel?(label||""):"",
+      travel_destination:isTravel?(label||""):"",travel_distance_km:distance,travel_fuel_rate_minor:rate,travel_fuel_minor:isTravel?fuel:null,travel_toll_minor:toll,travel_total_minor:isTravel?total:null,travel_preset_id:isTravel&&label==="Rayong plant"?demoPreset.id:null,
       status,created_at:now-idx*1000,updated_at:now-idx*1000};
   });
   await DB.bulkPut("entries",entries);
-  const sub=entries.filter(e=>e.status==="submitted"&&e.company_id===comps[0].id).slice(0,4);
+  const claimCompany=comps.find(c=>entries.filter(e=>e.status==="submitted"&&e.company_id===c.id&&claimThb(e)!=null).length>=2)||comps[0];
+  const sub=entries.filter(e=>e.status==="submitted"&&e.company_id===claimCompany.id&&claimThb(e)!=null).slice(0,4);
   if(sub.length>=2){
     const batchId=uid();
-    await DB.put("batches",{id:batchId,company_id:comps[0].id,submitted_date:todayISO(),
-      range_start:sub[sub.length-1].payment_date,range_end:sub[0].payment_date,note:"",created_at:now});
+    const claimYear=new Date().getFullYear(),claimCode=(claimCompany.code||codeFromName(claimCompany.name)).toUpperCase(),claimNo=`${claimCode}-${claimYear}-001`;
+    await DB.put("meta",{k:`claimseq:${claimCompany.id}:${claimYear}`,v:1});
+    await DB.put("batches",{id:batchId,company_id:claimCompany.id,submitted_date:todayISO(),
+      range_start:sub[sub.length-1].payment_date,range_end:sub[0].payment_date,note:"",claim_no:claimNo,created_at:now});
     for(const e of sub){
-      await DB.put("batch_entries",{id:uid(),batch_id:batchId,entry_id:e.id,
-        amount_minor_snapshot:e.amount_minor,currency_snapshot:e.currency,
-        vendor_snapshot:e.vendor||companyName(e.company_id),date_snapshot:e.payment_date,
-        outcome:"pending",outcome_updated_at:null});
+      await DB.put("batch_entries",{id:uid(),batch_id:batchId,entry_id:e.id,...snapshotFromEntry(e,comps.find(c=>c.id===e.company_id)),outcome:"pending",outcome_updated_at:null});
     }
   }
   await loadAll();
-  state.filter={company:null,status:null,from:null,to:null};
-  $("#screens .screen").forEach(x=>closeScreen(x));
+  state.filter={company:null,status:null,from:null,to:null,q:"",tags:[]};
+  $$("#screens .screen").forEach(x=>closeScreen(x));
   state.tab="home";
-  $(".tabbar button").forEach(b=>b.classList.toggle("active",b.dataset.tab==="home"));
+  $$(".tabbar button").forEach(b=>b.classList.toggle("active",b.dataset.tab==="home"));
   await renderHome();
   toast(`Loaded ${entries.length} sample entries`);
  }catch(err){toast("Could not load samples: "+(err&&err.message||err));console.error(err);}
@@ -2386,7 +2467,7 @@ async function seedExamples(){
 async function wipeAllData(){
   const stores=["companies","entries","tags","batches","batch_entries","edits","proofs","meta"];
   for(const s of stores){const all=await DB.getAll(s);for(const rec of all){const key=s==="tags"?rec.name:(s==="meta"?rec.k:rec.id);await DB.del(s,key);}}
-  await loadAll();$("#screens .screen").forEach(x=>closeScreen(x));renderHome();
+  await loadAll();$$("#screens .screen").forEach(x=>closeScreen(x));renderHome();
   toast("All data cleared");
 }
 
@@ -2415,34 +2496,28 @@ function refreshCurrent(){
 $("#fab").addEventListener("click",()=>openAddEntry(null));
 document.addEventListener("visibilitychange",()=>{ if(!document.hidden) renderBackupBanner(); });
 async function duplicateEntry(e){
+  e=normalizeTravel(e);
   const allTags=(await DB.getAll("tags")).map(t=>t.name);
-  draft={id:uid(),company_id:e.company_id,type:e.type,amount_minor:null,amount_str:(e.amount_minor/100).toString(),currency:e.currency,vendor:e.vendor,payment_date:todayISO(),notes:e.notes,tags:[...(e.tags||[])],location_lat:e.location_lat,location_lng:e.location_lng,location_label:e.location_label,status:"unclaimed",_proofs:[],_isNew:true};
+  draft={...e,id:uid(),amount_str:(e.amount_minor/100).toString(),claim_thb_str:"",claim_thb_minor:null,payment_date:todayISO(),status:"unclaimed",created_at:null,updated_at:null,tags:[...(e.tags||[])],_proofs:[],_isNew:true};
   const screens=$$("#screens .screen"); if(screens.length) closeScreen(screens[screens.length-1]);
   setTimeout(()=>renderEntryFormCompact(allTags,false),260);
 }
 
 function openSummary(){
   const list=state.entries;
-  const byCur={},outByCur={},reimByCur={},unByCur={},byCompany={},byTag={};
+  const empty=()=>({grand:{},unclaimed:{},submitted:{},reimbursed:{},count:0}),overall=empty(),byCompany=new Map(),byTag={};
+  const add=(o,e)=>{const thb=claimThb(e),c=thb!=null?"THB":e.currency,v=thb!=null?thb:e.amount_minor;o.grand[c]=(o.grand[c]||0)+v;o[e.status][c]=(o[e.status][c]||0)+v;o.count++;};
   for(const e of list){
-    byCur[e.currency]=(byCur[e.currency]||0)+e.amount_minor;
-    if(e.status==="submitted") outByCur[e.currency]=(outByCur[e.currency]||0)+e.amount_minor;
-    if(e.status==="reimbursed") reimByCur[e.currency]=(reimByCur[e.currency]||0)+e.amount_minor;
-    if(e.status==="unclaimed") unByCur[e.currency]=(unByCur[e.currency]||0)+e.amount_minor;
-    const cn=companyName(e.company_id);
-    byCompany[cn]=byCompany[cn]||{}; byCompany[cn][e.currency]=(byCompany[cn][e.currency]||0)+e.amount_minor;
+    add(overall,e);if(!byCompany.has(e.company_id))byCompany.set(e.company_id,empty());add(byCompany.get(e.company_id),e);
     (e.tags||[]).forEach(t=>{byTag[t]=byTag[t]||{}; byTag[t][e.currency]=(byTag[t][e.currency]||0)+e.amount_minor;});
   }
   const curLine=obj=>{const ks=Object.keys(obj);return ks.length?ks.map(c=>money(obj[c],c)).join("  ·  "):"—";};
   const rows=obj=>Object.keys(obj).sort().map(k=>`<div class="sum-row"><span>${esc(k)}</span><span class="v">${curLine(obj[k])}</span></div>`).join("")||`<div class="sum-row"><span>No data yet</span><span></span></div>`;
-  const totalCard=`<div class="sum-card"><h4>All logged</h4><div class="sum-row sum-big"><span>Grand total</span><span class="v">${curLine(byCur)}</span></div><div class="sum-row"><span>Entries</span><span class="v">${list.length}</span></div></div>`;
-  const statusCard=`<div class="sum-card"><h4>By status</h4>
-      <div class="sum-row"><span>Unclaimed</span><span class="v">${curLine(unByCur)}</span></div>
-      <div class="sum-row"><span>Submitted (outstanding)</span><span class="v">${curLine(outByCur)}</span></div>
-      <div class="sum-row"><span>Reimbursed</span><span class="v">${curLine(reimByCur)}</span></div></div>`;
-  const compCard=`<div class="sum-card"><h4>By company</h4>${rows(byCompany)}</div>`;
+  const card=(name,o,overallCard=false)=>`<div class="sum-card"><h4>${esc(name)} <span style="float:right;color:var(--slate);font-weight:500;">${o.count} ${o.count===1?"entry":"entries"}</span></h4><div class="sum-row sum-big"><span>Grand total</span><span class="v">${curLine(o.grand)}</span></div><div class="sum-row"><span class="st-word-unclaimed">Unclaimed</span><span class="v">${curLine(o.unclaimed)}</span></div><div class="sum-row"><span class="st-word-submitted">Submitted</span><span class="v">${curLine(o.submitted)}</span></div><div class="sum-row"><span class="st-word-reimbursed">Reimbursed</span><span class="v">${curLine(o.reimbursed)}</span></div></div>`;
+  const totalCard=card("All companies",overall,true);
+  const compCard=[...byCompany.entries()].sort((a,b)=>companyName(a[0]).localeCompare(companyName(b[0]))||a[0].localeCompare(b[0])).map(([id,o])=>card(companyName(id),o)).join("");
   const tagCard=Object.keys(byTag).length?`<div class="sum-card"><h4>By tag</h4>${rows(byTag)}</div>`:"";
-  openScreen("Summary", totalCard+statusCard+compCard+tagCard);
+  openScreen("Summary", totalCard+compCard+tagCard);
 }
 
 $("#summaryBtn").addEventListener("click",openSummary);
@@ -2456,6 +2531,7 @@ $("#filters").addEventListener("click",e=>{
     if(f==="company")c.company=null;
     if(f==="status")c.status=null;
     if(f==="date"){c.from=null;c.to=null;}
+    if(f==="tags")c.tags=[];
     renderHome();return;
   }
   if(f==="company"){
@@ -2475,6 +2551,13 @@ $("#filters").addEventListener("click",e=>{
       <button class="btn btn-ghost" id="fClear" style="margin-top:10px;">Clear</button>`);
     $("#fApply").addEventListener("click",()=>{c.from=$("#fFrom").value||null;c.to=$("#fTo").value||null;closeSheet();renderHome();});
     $("#fClear").addEventListener("click",()=>{c.from=null;c.to=null;closeSheet();renderHome();});
+  }else if(f==="tags"){
+    let selected=new Set(c.tags||[]);
+    const choices=Array.from(new Set(state.entries.flatMap(e=>e.tags||[]))).sort((a,b)=>a.localeCompare(b));
+    openSheet(`<h3>Filter by tags</h3><div class="list-choice" id="tagFilterList">${choices.length?choices.map(t=>`<button data-tag="${esc(t)}">${esc(t)} <span class="check">${selected.has(t)?"✓":""}</span></button>`).join(""):`<div class="hint" style="padding:12px;">No tags yet.</div>`}</div><button class="btn btn-primary" id="tagFilterApply" style="margin-top:12px;">Apply</button><button class="btn btn-ghost" id="tagFilterClear" style="margin-top:10px;">Clear</button>`);
+    $$("#tagFilterList button").forEach(b=>b.addEventListener("click",()=>{const t=b.dataset.tag;selected.has(t)?selected.delete(t):selected.add(t);b.querySelector(".check").textContent=selected.has(t)?"✓":"";}));
+    $("#tagFilterApply").addEventListener("click",()=>{c.tags=[...selected].sort((a,b)=>a.localeCompare(b));closeSheet();renderHome();});
+    $("#tagFilterClear").addEventListener("click",()=>{c.tags=[];closeSheet();renderHome();});
   }
 });
 $$(".tabbar button").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
