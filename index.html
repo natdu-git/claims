@@ -28,6 +28,16 @@
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
     --r:14px;
     --safe-b:env(safe-area-inset-bottom,0px);
+    --text-page-title:20px;
+    --text-control:16px;
+    --text-primary:17px;
+    --text-secondary:15px;
+    --text-meta:14px;
+    --text-nav:12px;
+    --weight-regular:400;
+    --weight-medium:500;
+    --weight-semibold:600;
+    --weight-bold:700;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   html,body{margin:0;padding:0;}
@@ -118,7 +128,7 @@
     display:flex;padding:3px 6px calc(3px + var(--safe-b));
   }
   body.form-open .tabbar{display:none;}
-  .tabbar button{flex:1;padding:4px 4px;font-family:var(--sans);font-size:10px;font-weight:500;color:var(--slate);display:flex;flex-direction:column;align-items:center;gap:1px;border-radius:8px;line-height:1.1;}
+  .tabbar button{flex:1;padding:4px 4px;font-family:var(--sans);font-size:var(--text-nav);font-weight:var(--weight-medium);color:var(--slate);display:flex;flex-direction:column;align-items:center;gap:1px;border-radius:8px;line-height:1.1;}
   .tabbar button.active{color:var(--jade);}
   .tabbar button svg{width:18px;height:18px;}
   .fab{
@@ -306,7 +316,7 @@
   .tot-figs .tf{font-family:var(--mono);font-weight:600;font-size:18px;}
   .warn{background:#fdf0e0;color:var(--amber);border-radius:10px;padding:10px 12px;font-size:13px;font-weight:600;margin-bottom:10px;}
 
-  .batch-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 15px;margin-bottom:12px;}
+  .batch-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:10px;}
   .batch-card .bh{display:flex;justify-content:space-between;align-items:baseline;}
   .batch-card .bh .bt{font-weight:700;}
   .batch-card .bh .bd{font-size:12.5px;color:var(--slate);}
@@ -363,13 +373,20 @@
   .sum-row:last-child{border-bottom:none;}
   .sum-row .v{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;}
   .sum-big .v{font-size:16px;}
-  .batch-filter{width:auto;margin:0 0 12px;padding:8px 13px;}
-  .batch-card-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(100px,.8fr);gap:5px 12px;align-items:baseline;}
-  .batch-card-grid .left{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .batch-card-grid .right{text-align:right;min-width:0;}
-  .batch-card-grid .total{white-space:nowrap;font-family:var(--mono);font-weight:650;}
-  .batch-card-grid .claim-line{font-weight:600;}
-  .batch-card-grid .outcomes{font-size:11.5px;color:var(--slate);}
+  .batches-screen .screen-head h2{font-size:var(--text-page-title);font-weight:var(--weight-bold);}
+  .batch-filter{width:auto;margin:0 0 12px;padding:7px 12px;font-size:var(--text-control);font-weight:var(--weight-semibold);}
+  .batch-card-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(92px,auto);column-gap:10px;row-gap:5px;align-items:baseline;}
+  .batch-card-grid .left{min-width:0;white-space:nowrap;}
+  .batch-card-grid .right{text-align:right;min-width:0;justify-self:end;}
+  .batch-card-grid .claim-line{display:flex;min-width:0;gap:.28em;font-size:var(--text-primary);font-weight:var(--weight-semibold);}
+  .batch-card-grid .claim-date{flex:none;}
+  .batch-card-grid .claim-id{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .batch-card-grid .total{max-width:46vw;overflow-wrap:anywhere;line-height:1.2;font-family:var(--mono);font-size:var(--text-primary);font-weight:var(--weight-bold);}
+  .batch-card-grid>:nth-child(3){min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--text-secondary);font-weight:var(--weight-medium);}
+  .batch-card-grid>:nth-child(4){font-size:var(--text-secondary);font-weight:var(--weight-semibold);white-space:nowrap;background:transparent;padding:0;border-radius:0;}
+  .batch-card-grid>:nth-child(5),.batch-card-grid .outcomes{font-size:var(--text-meta);font-weight:var(--weight-regular);color:var(--slate);}
+  .batch-card-grid>:nth-child(5){min-width:0;overflow:hidden;text-overflow:ellipsis;}
+  .batch-card-grid .outcomes{max-width:46vw;line-height:1.25;overflow-wrap:anywhere;}
   .batch-card.cancelled .batch-card-grid{color:var(--slate);}
   .travel-calc{font-family:var(--mono);font-variant-numeric:tabular-nums;}
   .rate-action{font-size:12px;color:var(--jade);margin-top:5px;}
@@ -1656,7 +1673,7 @@ async function openBatchesTab(){
     else if(reimbursed>0){statusTag="Reimbursed";cls="st-reimbursed-c";}
     else{statusTag="Closed";cls="st-unclaimed-c";}
     const outcome=[pending&&`${pending} pending`,reimbursed&&`${reimbursed} paid`,rejected&&`${rejected} rejected`].filter(Boolean).join(" · ")||"—";
-    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${b.id}"><div class="batch-card-grid"><div class="left claim-line">${fmtDateShort(b.submitted_date)} · <span class="mono">${esc(b.claim_no||"")}</span></div><div class="right total">${amountLine(amounts.submitted)}</div><div class="left">${esc(companyName(b.company_id))} · ${items.length} item${items.length!==1?"s":""}</div><div class="right ${cls}">${statusTag}</div><div class="left">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)}</div><div class="right outcomes">${outcome}</div></div></div>`;
+    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${b.id}"><div class="batch-card-grid"><div class="left claim-line"><span class="claim-date">${fmtDateShort(b.submitted_date)} ·</span><span class="claim-id mono">${esc(b.claim_no||"")}</span></div><div class="right total">${amountLine(amounts.submitted)}</div><div class="left">${esc(companyName(b.company_id))} · ${items.length} item${items.length!==1?"s":""}</div><div class="right ${cls}">${statusTag}</div><div class="left">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)}</div><div class="right outcomes">${outcome}</div></div></div>`;
   }).join("");
   let body;
   if(batches.length===0){
@@ -1665,7 +1682,7 @@ async function openBatchesTab(){
     const labels={active:"Active claims",cancelled:"Cancelled claims",all:"All claims"},list=state.batchFilter==="active"?active:state.batchFilter==="cancelled"?cancelled:[...batches].sort(sort);
     body=`<button class="chip batch-filter active" id="batchFilter">${labels[state.batchFilter]} ▾</button>${list.length?cards(list):`<div class="empty" style="padding:30px 20px;"><h3>No ${labels[state.batchFilter].toLowerCase()}</h3></div>`}`;
   }
-  const sc=openScreen("Claims", body);
+  const sc=openScreen("Claims", body);sc.classList.add("batches-screen");
   sc.querySelector("#batchFilter")?.addEventListener("click",()=>chooseSheet("Show claims",[{value:"active",label:"Active claims"},{value:"cancelled",label:"Cancelled claims"},{value:"all",label:"All claims"}],state.batchFilter,v=>{state.batchFilter=v;closeScreen(sc);setTimeout(openBatchesTab,260);}));
   sc.querySelectorAll(".batch-card").forEach(c=>c.addEventListener("click",()=>{closeScreen(sc);setTimeout(()=>openBatchDetail(c.dataset.id),260);}));
 }
