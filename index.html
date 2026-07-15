@@ -28,11 +28,6 @@
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
     --r:14px;
     --safe-b:env(safe-area-inset-bottom,0px);
-    --text-page-title:20px;
-    --text-control:16px;
-    --text-primary:17px;
-    --text-secondary:15px;
-    --text-meta:14px;
     --text-nav:12px;
     --weight-regular:400;
     --weight-medium:500;
@@ -373,22 +368,22 @@
   .sum-row:last-child{border-bottom:none;}
   .sum-row .v{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;}
   .sum-big .v{font-size:16px;}
-  .batches-screen .screen-head h2{font-size:var(--text-page-title);font-weight:var(--weight-bold);}
-  .batch-filter{width:auto;margin:0 0 12px;padding:7px 12px;font-size:var(--text-control);font-weight:var(--weight-semibold);}
+  .batches-screen .screen-head h2{font-size:17px;font-weight:var(--weight-bold);}
+  .batch-filter,.batch-filter.active{width:auto;margin:0 0 12px;padding:7px 12px;font-size:13px;font-weight:var(--weight-medium);background:var(--surface);color:var(--ink-soft);border-color:var(--line);}
   .batch-card-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(92px,auto);column-gap:10px;row-gap:5px;align-items:baseline;}
   .batch-card-grid .left{min-width:0;white-space:nowrap;}
   .batch-card-grid .right{text-align:right;min-width:0;justify-self:end;}
-  .batch-card-grid .claim-line{display:flex;min-width:0;gap:.28em;font-size:var(--text-primary);font-weight:var(--weight-semibold);}
+  .batch-card-grid .claim-line{display:flex;min-width:0;gap:.28em;font-size:15px;font-weight:var(--weight-semibold);}
   .batch-card-grid .claim-date{flex:none;}
   .batch-card-grid .claim-id{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .batch-card-grid .claim-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .batch-card-grid .batch-ident-line{display:flex;min-width:0;gap:.28em;white-space:nowrap;}
   .batch-card-grid .batch-ident-line .claim-id{flex:0 1 auto;}
   .batch-card-grid .batch-company-items{flex:none;}
-  .batch-card-grid .total{max-width:46vw;overflow-wrap:anywhere;line-height:1.2;font-family:var(--mono);font-size:var(--text-primary);font-weight:var(--weight-bold);}
-  .batch-card-grid>:nth-child(3){min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--text-secondary);font-weight:var(--weight-medium);}
-  .batch-card-grid>:nth-child(4){font-size:var(--text-secondary);font-weight:var(--weight-semibold);white-space:nowrap;background:transparent;padding:0;border-radius:0;}
-  .batch-card-grid>:nth-child(5),.batch-card-grid .outcomes{font-size:var(--text-meta);font-weight:var(--weight-regular);color:var(--slate);}
+  .batch-card-grid .total{max-width:46vw;overflow-wrap:anywhere;line-height:1.2;font-family:var(--mono);font-size:15px;font-weight:var(--weight-bold);}
+  .batch-card-grid>:nth-child(3){min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;font-weight:var(--weight-medium);}
+  .batch-card-grid>:nth-child(4){font-size:12.5px;font-weight:var(--weight-semibold);white-space:nowrap;background:transparent;padding:0;border-radius:0;}
+  .batch-card-grid>:nth-child(5),.batch-card-grid .outcomes{font-size:11.5px;font-weight:var(--weight-regular);color:var(--slate);}
   .batch-card-grid>:nth-child(5){min-width:0;overflow:hidden;text-overflow:ellipsis;}
   .batch-card-grid .outcomes{max-width:46vw;line-height:1.25;overflow-wrap:anywhere;}
   .batch-card.cancelled .batch-card-grid{color:var(--slate);}
@@ -1692,7 +1687,7 @@ async function openBatchesTab(){
     body=`<div class="empty"><h3>No claims yet</h3><p>Build a claim from the Claim tab to submit expenses together.</p></div>`;
   }else{
     const labels={active:"Active claims",cancelled:"Cancelled claims",all:"All claims"},list=state.batchFilter==="active"?active:state.batchFilter==="cancelled"?cancelled:[...batches].sort(sort);
-    body=`<button class="chip batch-filter active" id="batchFilter">${labels[state.batchFilter]} ▾</button>${list.length?cards(list):`<div class="empty" style="padding:30px 20px;"><h3>No ${labels[state.batchFilter].toLowerCase()}</h3></div>`}`;
+    body=`<button class="chip batch-filter" id="batchFilter">${labels[state.batchFilter]} ▾</button>${list.length?cards(list):`<div class="empty" style="padding:30px 20px;"><h3>No ${labels[state.batchFilter].toLowerCase()}</h3></div>`}`;
   }
   const sc=openScreen("Claims", body);sc.classList.add("batches-screen");
   sc.querySelector("#batchFilter")?.addEventListener("click",()=>chooseSheet("Show claims",[{value:"active",label:"Active claims"},{value:"cancelled",label:"Cancelled claims"},{value:"all",label:"All claims"}],state.batchFilter,v=>{state.batchFilter=v;closeScreen(sc);setTimeout(openBatchesTab,260);}));
