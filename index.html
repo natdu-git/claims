@@ -381,6 +381,10 @@
   .batch-card-grid .claim-line{display:flex;min-width:0;gap:.28em;font-size:var(--text-primary);font-weight:var(--weight-semibold);}
   .batch-card-grid .claim-date{flex:none;}
   .batch-card-grid .claim-id{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .batch-card-grid .claim-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .batch-card-grid .batch-ident-line{display:flex;min-width:0;gap:.28em;white-space:nowrap;}
+  .batch-card-grid .batch-ident-line .claim-id{flex:0 1 auto;}
+  .batch-card-grid .batch-company-items{flex:none;}
   .batch-card-grid .total{max-width:46vw;overflow-wrap:anywhere;line-height:1.2;font-family:var(--mono);font-size:var(--text-primary);font-weight:var(--weight-bold);}
   .batch-card-grid>:nth-child(3){min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--text-secondary);font-weight:var(--weight-medium);}
   .batch-card-grid>:nth-child(4){font-size:var(--text-secondary);font-weight:var(--weight-semibold);white-space:nowrap;background:transparent;padding:0;border-radius:0;}
@@ -1448,7 +1452,7 @@ function changeStatusSheet(e){
 /* ============================================================
    CLAIM builder
    ============================================================ */
-const claimState={company:null, from:null, to:null, showAll:false, selected:new Set()};
+const claimState={company:null, from:null, to:null, showAll:false, claimName:"", selected:new Set()};
 
 function openClaim(){
   if(state.companies.length===0){toast("Add a company first");openCompanies(true);return;}
@@ -1504,6 +1508,7 @@ async function renderClaim(){
   const body=`
     <div class="field"><label>Company</label>
       <button id="claimCompany" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:var(--surface);color:var(--ink);font-size:16px;display:flex;justify-content:space-between;align-items:center;">${esc(companyName(claimState.company))} <span style="color:var(--slate);">▾</span></button></div>
+    <div class="field"><label>Claim name <span class="opt">(optional)</span></label><input type="text" id="claimName" maxlength="100" placeholder="e.g. July client travel" value="${esc(claimState.claimName)}"></div>
     <div style="display:flex;gap:10px;">
       <div class="field" style="flex:1;"><label>From</label><input type="date" id="claimFrom" value="${claimState.from}"></div>
       <div class="field" style="flex:1;"><label>To</label><input type="date" id="claimTo" value="${claimState.to}"></div>
@@ -1531,6 +1536,7 @@ async function renderClaim(){
   }
 
   // wire
+  sc.querySelector("#claimName")?.addEventListener("input",e=>{claimState.claimName=e.target.value;});
   sc.querySelector("#claimCompany").addEventListener("click",()=>{
     chooseSheet("Company",state.companies.map(c=>({value:c.id,label:c.name})),claimState.company,v=>{
       claimState.company=v;claimState.selected=new Set();closeScreen(sc);renderClaim();
@@ -1601,6 +1607,9 @@ async function createClaimAtomic(input){
   if(!validISODate(input.submittedDate))throw claimError("The submission date is invalid");
   const year=+input.submittedDate.slice(0,4),now=Date.now(),batchId=uid();
   return DB.runTransaction(["companies","meta","batches","batch_entries","entries"],"readwrite",async(s,t,req)=>{
+    const normalizedClaimName=input.claimName==null?"":(typeof input.claimName==="string"?input.claimName.trim():null);
+    if(normalizedClaimName==null)throw claimError("The claim name must be text");
+    if(normalizedClaimName.length>100)throw claimError("The claim name must be 100 characters or fewer");
     const company=await req(s.companies.get(input.companyId));
     if(!company||company.archived)throw claimError("The selected company is unavailable");
     const entries=[];
@@ -1633,7 +1642,7 @@ async function createClaimAtomic(input){
     const code=(company.code||codeFromName(company.name)).toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6)||"CO";
     const claimNo=`${code}-${year}-${String(sequence).padStart(3,"0")}`;
     if(batches.some(b=>b.claim_no===claimNo))throw claimError("That claim number already exists; refresh and try again");
-    const batch={id:batchId,company_id:company.id,submitted_date:input.submittedDate,range_start:input.rangeStart,range_end:input.rangeEnd,note:"",created_at:now,claim_no:claimNo};
+    const batch={id:batchId,company_id:company.id,submitted_date:input.submittedDate,range_start:input.rangeStart,range_end:input.rangeEnd,note:"",claim_name:normalizedClaimName,created_at:now,claim_no:claimNo};
     await req(s.meta.put({k:seqKey,v:sequence}));auditFail("claim-after-counter");await req(s.batches.put(batch));auditFail("claim-after-batch");
     for(const e of entries){
       await req(s.batch_entries.put({id:uid(),batch_id:batchId,entry_id:e.id,...snapshotFromEntry(e,company),outcome:"pending",outcome_updated_at:null}));auditFail("claim-after-batch-entry");
@@ -1645,8 +1654,8 @@ async function generateBatch(list,screen){
   const btn=screen.querySelector("#genBtn");if(btn?.dataset.busy)return;
   const ids=[...claimState.selected];if(!ids.length)return;
   if(btn){btn.dataset.busy="1";btn.disabled=true;btn.textContent="Creating claim…";}
-  try{const result=await createClaimAtomic({companyId:claimState.company,entryIds:ids,rangeStart:claimState.from,rangeEnd:claimState.to,submittedDate:todayISO()});
-    await loadAll();claimState.selected=new Set();setTab("batches");toast(`Claim created · ${result.entryCount} items marked submitted`);setTimeout(()=>openBatchDetail(result.batchId),300);
+  try{const result=await createClaimAtomic({companyId:claimState.company,entryIds:ids,rangeStart:claimState.from,rangeEnd:claimState.to,submittedDate:todayISO(),claimName:claimState.claimName});
+    await loadAll();claimState.selected=new Set();claimState.claimName="";setTab("batches");toast(`Claim created · ${result.entryCount} items marked submitted`);setTimeout(()=>openBatchDetail(result.batchId),300);
   }catch(err){console.error("Claim creation failed",err);toast(err.message||"Claim creation failed — refresh and try again");if(btn){delete btn.dataset.busy;btn.disabled=false;btn.textContent=`Generate claim · ${ids.length} item${ids.length!==1?"s":""}`;}}
 }
 
@@ -1673,7 +1682,10 @@ async function openBatchesTab(){
     else if(reimbursed>0){statusTag="Reimbursed";cls="st-reimbursed-c";}
     else{statusTag="Closed";cls="st-unclaimed-c";}
     const outcome=[pending&&`${pending} pending`,reimbursed&&`${reimbursed} paid`,rejected&&`${rejected} rejected`].filter(Boolean).join(" · ")||"—";
-    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${b.id}"><div class="batch-card-grid"><div class="left claim-line"><span class="claim-date">${fmtDateShort(b.submitted_date)} ·</span><span class="claim-id mono">${esc(b.claim_no||"")}</span></div><div class="right total">${amountLine(amounts.submitted)}</div><div class="left">${esc(companyName(b.company_id))} · ${items.length} item${items.length!==1?"s":""}</div><div class="right ${cls}">${statusTag}</div><div class="left">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)}</div><div class="right outcomes">${outcome}</div></div></div>`;
+    const claimName=typeof b.claim_name==="string"?b.claim_name.trim():"",companyItems=`${esc(companyName(b.company_id))} · ${items.length} item${items.length!==1?"s":""}`;
+    const firstLeft=claimName?`<span class="claim-date">${fmtDateShort(b.submitted_date)} ·</span><span class="claim-name">${esc(claimName)}</span>`:`<span class="claim-date">${fmtDateShort(b.submitted_date)} ·</span><span class="claim-id mono">${esc(b.claim_no||"")}</span>`;
+    const secondLeft=claimName?`<span class="claim-id mono">${esc(b.claim_no||"")}</span><span class="batch-company-items"> · ${companyItems}</span>`:companyItems;
+    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${b.id}"><div class="batch-card-grid"><div class="left claim-line">${firstLeft}</div><div class="right total">${amountLine(amounts.submitted)}</div><div class="left ${claimName?"batch-ident-line":""}">${secondLeft}</div><div class="right ${cls}">${statusTag}</div><div class="left">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)}</div><div class="right outcomes">${outcome}</div></div></div>`;
   }).join("");
   let body;
   if(batches.length===0){
@@ -1689,6 +1701,7 @@ async function openBatchesTab(){
 
 async function openBatchDetail(batchId){
   const batch=await DB.get("batches",batchId);if(!batch)return;
+  const claimName=typeof batch.claim_name==="string"?batch.claim_name.trim():"";
   const items=(await DB.getByIndex("batch_entries","batch_id",batchId));
   const amounts=batchAmounts(items),isCancelled=batch.status==="cancelled";
 
@@ -1730,6 +1743,7 @@ async function openBatchDetail(batchId){
   const body=`
     <div class="kv">
       <div class="r"><span class="k">Claim ID</span><span class="v mono">${esc(batch.claim_no||"—")}</span></div>
+      ${claimName?`<div class="r"><span class="k">Claim name</span><span class="v">${esc(claimName)}</span></div>`:""}
       <div class="r"><span class="k">Company</span><span class="v">${esc(companyName(batch.company_id))}</span></div>
       <div class="r"><span class="k">Submitted</span><span class="v">${fmtDate(batch.submitted_date)}</span></div>
       <div class="r"><span class="k">Date range</span><span class="v">${fmtDateShort(batch.range_start)} – ${fmtDateShort(batch.range_end)}</span></div>
@@ -1741,6 +1755,7 @@ async function openBatchDetail(batchId){
       <div class="r"><span class="k">Rejected amount</span><span class="v mono">${amountLine(amounts.rejected)}</span></div>
       ${reimbInfo}
     </div>
+    <button class="btn btn-ghost btn-sm" id="editClaimName" style="margin:-6px 0 14px;">Edit claim name</button>
     ${slipBlock}
     <div class="hint" style="margin-bottom:6px;">${isCancelled?"This cancelled claim is retained as read-only history.":"Tap an item to mark it reimbursed or rejected. Rejected items go back to Unclaimed for a future claim."}</div>
     <div class="section-label">Items</div>
@@ -1749,6 +1764,11 @@ async function openBatchDetail(batchId){
     ${actionBtn}
   `;
   const sc=openScreen("Claim detail", body);
+  sc.querySelector("#editClaimName").addEventListener("click",()=>{
+    openSheet(`<h3>Edit claim name</h3><div class="field"><input type="text" id="claimNameEdit" maxlength="100" placeholder="e.g. July client travel" value="${esc(claimName)}"></div><button class="btn btn-primary" id="claimNameSave">Save</button><button class="btn btn-ghost" id="claimNameCancel" style="margin-top:10px;">Cancel</button>`);
+    document.querySelector("#claimNameCancel").addEventListener("click",closeSheet);
+    document.querySelector("#claimNameSave").addEventListener("click",async()=>{const value=document.querySelector("#claimNameEdit").value.trim();if(value.length>100){toast("The claim name must be 100 characters or fewer");return;}const current=await DB.get("batches",batchId);if(!current){toast("This claim no longer exists");return;}current.claim_name=value;await DB.put("batches",current);await loadAll();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast(value?"Claim name updated":"Claim name cleared");});
+  });
   if(!isCancelled)sc.querySelectorAll(".claim-row").forEach(r=>r.addEventListener("click",()=>itemOutcomeSheet(r.dataset.be,r.dataset.entry,batchId)));
   sc.querySelector("#claimSheetBtn").addEventListener("click",()=>exportClaimSheet(batchId));
   const slipThumb=sc.querySelector("#rbSlipThumb"); if(slipThumb) slipThumb.addEventListener("click",()=>viewImage(batch.reimburse_proof));
@@ -1988,6 +2008,7 @@ function promptClaimantName(onDone){
    ============================================================ */
 async function exportClaimSheet(batchId){
   const batch=await DB.get("batches",batchId); if(!batch) return;
+  const claimName=typeof batch.claim_name==="string"?batch.claim_name.trim():"";
   if(!state.claimantName){ promptClaimantName(()=>exportClaimSheet(batchId)); return; }  // name required on the sheet
   const items=(await DB.getByIndex("batch_entries","batch_id",batchId)).sort((a,b)=>a.date_snapshot.localeCompare(b.date_snapshot));
   const tot={}; items.forEach(i=>tot[i.currency_snapshot]=(tot[i.currency_snapshot]||0)+i.amount_minor_snapshot);
@@ -2046,6 +2067,7 @@ async function exportClaimSheet(batchId){
       <h2>Claim ${esc(batch.claim_no||"")}</h2>
       <table class="pkv psummary">
         <tr><td>Claim ID</td><td>${esc(batch.claim_no||"—")}</td></tr>
+        ${claimName?`<tr><td>Claim name</td><td>${esc(claimName)}</td></tr>`:""}
         <tr><td>Claimant</td><td>${esc(state.claimantName||"—")}</td></tr>
         <tr><td>Company</td><td>${esc(companyName(batch.company_id))}</td></tr>
         <tr><td>Period</td><td>${fmtDate(batch.range_start)} – ${fmtDate(batch.range_end)}</td></tr>
@@ -2076,9 +2098,10 @@ function downloadFile(name,content,type){
 }
 async function exportBatchCSV(batchId){
   const batch=await DB.get("batches",batchId);
+  const claimName=typeof batch?.claim_name==="string"?batch.claim_name.trim():"";
   const items=await DB.getByIndex("batch_entries","batch_id",batchId);
   const header=["Date","Vendor","Amount","Currency","Outcome","Destination","Total distance","Fuel rate","Fuel amount","Toll","Total amount"];
-  const lines=[header.join(",")];
+  const lines=[["Claim ID",csvEscape(batch?.claim_no||"")].join(","),...(claimName?[["Claim name",csvEscape(claimName)].join(",")]:[]),"",header.join(",")];
   items.sort((a,b)=>a.date_snapshot.localeCompare(b.date_snapshot));
   items.forEach(i=>lines.push([i.date_snapshot,csvEscape(snapshotDisplayName(i)),(i.amount_minor_snapshot/100).toFixed(2),i.currency_snapshot,i.outcome,csvEscape(i.travel_destination_snapshot||""),i.travel_distance_km_snapshot??"",i.travel_fuel_rate_minor_snapshot==null?"":(i.travel_fuel_rate_minor_snapshot/100).toFixed(2),i.travel_fuel_minor_snapshot==null?"":(i.travel_fuel_minor_snapshot/100).toFixed(2),i.travel_toll_minor_snapshot==null?"":(i.travel_toll_minor_snapshot/100).toFixed(2),i.travel_total_minor_snapshot==null?"":(i.travel_total_minor_snapshot/100).toFixed(2)].join(",")));
   // totals
@@ -2296,7 +2319,7 @@ function normalizeBackup(data){
   out.companies=data.companies.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid company record","companies");unique("companies",x.id);if(!safeString(x.name,500)||!x.name.trim()||!currencies.has(x.default_currency)||typeof x.archived!=="boolean"||!finiteTime(x.created_at)||!/^#[0-9a-f]{6}$/i.test(x.color||"")||!/^[A-Z0-9]{1,6}$/.test(x.code||""))throw restoreError(stage,`Invalid company '${x.id}'`,"companies",x.id);return {...x,name:x.name.trim(),code:x.code.toUpperCase()};});
   out.entries=data.entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid entry record","entries");unique("entries",x.id);if(typeof x.company_id!=="string"||!["expense","travel"].includes(x.type)||!Number.isSafeInteger(x.amount_minor)||x.amount_minor<0||!currencies.has(x.currency)||(x.claim_thb_minor!=null&&(!Number.isSafeInteger(x.claim_thb_minor)||x.claim_thb_minor<0))||!validISODate(x.payment_date)||!["unclaimed","submitted","reimbursed"].includes(x.status)||!safeString(x.vendor)||!safeString(x.notes)||!safeString(x.location_label||"")||!Array.isArray(x.tags)||x.tags.some(t=>!safeString(t,500))||!validCoordPair(x.location_lat,x.location_lng)||!finiteTime(x.created_at)||!finiteTime(x.updated_at,true))throw restoreError(stage,`Invalid entry '${x.id}'`,"entries",x.id);validateTravelFields(x);return {...x,tags:[...x.tags]};});
   out.tags=data.tags.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid tag record","tags");unique("tags",x.name);if(!safeString(x.name,500)||!x.name.trim()||!finiteTime(x.created_at,true))throw restoreError(stage,`Invalid tag '${x.name}'`,"tags",x.name);return {...x};});
-  out.batches=data.batches.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch record","batches");unique("batches",x.id);if(typeof x.company_id!=="string"||!validISODate(x.submitted_date)||!validISODate(x.range_start)||!validISODate(x.range_end)||x.range_start>x.range_end||!safeString(x.note||"")||!finiteTime(x.created_at)||!safeString(x.claim_no,200)||!x.claim_no||(x.status!=null&&x.status!=="cancelled")||(x.status==="cancelled"&&!finiteTime(x.cancelled_at))||(x.status!=="cancelled"&&x.cancelled_at!=null)||(x.reimbursed_date!=null&&!validISODate(x.reimbursed_date))||!finiteTime(x.reimbursed_at,true))throw restoreError(stage,`Invalid batch '${x.id}'`,"batches",x.id);return {...x};});
+  out.batches=data.batches.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch record","batches");unique("batches",x.id);const claimName=x.claim_name==null?"":(typeof x.claim_name==="string"?x.claim_name.trim():null);if(claimName==null||claimName.length>100||typeof x.company_id!=="string"||!validISODate(x.submitted_date)||!validISODate(x.range_start)||!validISODate(x.range_end)||x.range_start>x.range_end||!safeString(x.note||"")||!finiteTime(x.created_at)||!safeString(x.claim_no,200)||!x.claim_no||(x.status!=null&&x.status!=="cancelled")||(x.status==="cancelled"&&!finiteTime(x.cancelled_at))||(x.status!=="cancelled"&&x.cancelled_at!=null)||(x.reimbursed_date!=null&&!validISODate(x.reimbursed_date))||!finiteTime(x.reimbursed_at,true))throw restoreError(stage,`Invalid batch '${x.id}'`,"batches",x.id);return {...x,claim_name:claimName};});
   out.batch_entries=data.batch_entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid batch entry record","batch_entries");unique("batch_entries",x.id);if(typeof x.batch_id!=="string"||typeof x.entry_id!=="string"||!Number.isSafeInteger(x.amount_minor_snapshot)||x.amount_minor_snapshot<0||!currencies.has(x.currency_snapshot)||(x.original_amount_minor!=null&&(!Number.isSafeInteger(x.original_amount_minor)||x.original_amount_minor<0))||(x.original_currency!=null&&!currencies.has(x.original_currency))||!safeString(x.vendor_snapshot)||!validISODate(x.date_snapshot)||!["pending","reimbursed","rejected"].includes(x.outcome)||!finiteTime(x.outcome_updated_at,true)||!finiteTime(x.synced_at,true)||(x.synced_fields!=null&&(!Array.isArray(x.synced_fields)||x.synced_fields.some(v=>!safeString(v,200))))||(x.company_id_snapshot!=null&&typeof x.company_id_snapshot!=="string")||(x.type_snapshot!=null&&!["expense","travel"].includes(x.type_snapshot))||(x.notes_snapshot!=null&&!safeString(x.notes_snapshot))||(x.tags_snapshot!=null&&(!Array.isArray(x.tags_snapshot)||x.tags_snapshot.some(v=>!safeString(v,500))))||(x.location_label_snapshot!=null&&!safeString(x.location_label_snapshot))||!validCoordPair(x.location_lat_snapshot,x.location_lng_snapshot))throw restoreError(stage,`Invalid batch entry '${x.id}'`,"batch_entries",x.id);validateTravelFields(x,"_snapshot");return {...x,...(x.tags_snapshot?{tags_snapshot:[...x.tags_snapshot]}:{})};});
   out.edits=data.edits.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid edit record","edits");unique("edits",x.id);if(typeof x.entry_id!=="string"||!finiteTime(x.edited_at)||!isPlainObject(x.changes)||Object.keys(x.changes).some(k=>["__proto__","prototype","constructor"].includes(k))||!(x.reason==null||safeString(x.reason)))throw restoreError(stage,`Invalid edit '${x.id}'`,"edits",x.id);return {...x,changes:{...x.changes}};});
   out.meta=data.meta.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid metadata record","meta");unique("meta",x.k);if(/^claimseq:/.test(x.k)&&(!Number.isSafeInteger(x.v)||x.v<0))throw restoreError(stage,`Invalid claim counter '${x.k}'`,"meta",x.k);try{structuredClone(x.v);}catch(e){throw restoreError(stage,`Unsupported metadata '${x.k}'`,"meta",x.k);}return {k:x.k,v:x.v};});
