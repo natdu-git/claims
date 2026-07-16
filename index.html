@@ -507,6 +507,15 @@ function fmtDateText(iso){if(!iso)return"Pick a date";return fmtDate(iso);}
 
 function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),2200);}
 
+// Records that data changed just now, so the backup-reminder banner can rely on it even when
+// the change (e.g. a deletion) leaves no updated_at/created_at timestamp behind to scan for.
+async function markDataChanged(){
+  const now = Date.now();
+  await DB.put("meta", {k:"lastChangeAt", v: now});
+  state.newestChange = Math.max(state.newestChange || 0, now);
+  renderBackupBanner();
+}
+
 /* ============================================================
    IndexedDB layer
    ============================================================ */
@@ -612,7 +621,8 @@ async function loadAll(){
   state.companies.forEach(c=>{ newest=Math.max(newest, c.created_at||0); });
   batches.forEach(b=>{ newest=Math.max(newest, b.created_at||0, b.reimbursed_at||0, b.cancelled_at||0); });
   batchEntries.forEach(be=>{ newest=Math.max(newest, be.outcome_updated_at||0, be.synced_at||0); });
-  state.newestChange = newest;
+  const lc = await DB.get("meta","lastChangeAt");
+  state.newestChange = Math.max(newest, lc?.v || 0);
   state.hasData = state.entries.length>0 || state.companies.length>0;
 }
 function companyName(id){const c=state.companies.find(c=>c.id===id);return c?c.name:"—";}
@@ -1094,6 +1104,7 @@ async function saveEntry(isEdit){
   }
 
   await loadAll();
+  await markDataChanged();
   refreshCurrent();
 }
 
@@ -1114,7 +1125,7 @@ function confirmDelete(id,screen){
     <button class="btn btn-ghost" id="delNo" style="margin-top:10px;">Cancel</button>`);
   $("#delYes").addEventListener("click",async()=>{
     const btn=$("#delYes");if(btn.dataset.busy)return;btn.dataset.busy="1";btn.disabled=true;
-    try{await deleteEntryAtomic(id);await loadAll();refreshCurrent();closeSheet();if(screen)closeScreen(screen);toast("Entry deleted");}
+    try{await deleteEntryAtomic(id);await loadAll();await markDataChanged();refreshCurrent();closeSheet();if(screen)closeScreen(screen);toast("Entry deleted");}
     catch(e){console.error("Entry deletion failed",e);toast(e.message||"Entry could not be deleted");delete btn.dataset.busy;btn.disabled=false;}
   });
   $("#delNo").addEventListener("click",closeSheet);
@@ -1650,7 +1661,7 @@ async function generateBatch(list,screen){
   const ids=[...claimState.selected];if(!ids.length)return;
   if(btn){btn.dataset.busy="1";btn.disabled=true;btn.textContent="Creating claim…";}
   try{const result=await createClaimAtomic({companyId:claimState.company,entryIds:ids,rangeStart:claimState.from,rangeEnd:claimState.to,submittedDate:todayISO(),claimName:claimState.claimName});
-    await loadAll();claimState.selected=new Set();claimState.claimName="";setTab("batches");toast(`Claim created · ${result.entryCount} items marked submitted`);setTimeout(()=>openBatchDetail(result.batchId),300);
+    await loadAll();await markDataChanged();claimState.selected=new Set();claimState.claimName="";setTab("batches");toast(`Claim created · ${result.entryCount} items marked submitted`);setTimeout(()=>openBatchDetail(result.batchId),300);
   }catch(err){console.error("Claim creation failed",err);toast(err.message||"Claim creation failed — refresh and try again");if(btn){delete btn.dataset.busy;btn.disabled=false;btn.textContent=`Generate claim · ${ids.length} item${ids.length!==1?"s":""}`;}}
 }
 
@@ -1762,7 +1773,7 @@ async function openBatchDetail(batchId){
   sc.querySelector("#editClaimName").addEventListener("click",()=>{
     openSheet(`<h3>Edit claim name</h3><div class="field"><input type="text" id="claimNameEdit" maxlength="100" placeholder="e.g. July client travel" value="${esc(claimName)}"></div><button class="btn btn-primary" id="claimNameSave">Save</button><button class="btn btn-ghost" id="claimNameCancel" style="margin-top:10px;">Cancel</button>`);
     document.querySelector("#claimNameCancel").addEventListener("click",closeSheet);
-    document.querySelector("#claimNameSave").addEventListener("click",async()=>{const value=document.querySelector("#claimNameEdit").value.trim();if(value.length>100){toast("The claim name must be 100 characters or fewer");return;}const current=await DB.get("batches",batchId);if(!current){toast("This claim no longer exists");return;}current.claim_name=value;await DB.put("batches",current);await loadAll();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast(value?"Claim name updated":"Claim name cleared");});
+    document.querySelector("#claimNameSave").addEventListener("click",async()=>{const value=document.querySelector("#claimNameEdit").value.trim();if(value.length>100){toast("The claim name must be 100 characters or fewer");return;}const current=await DB.get("batches",batchId);if(!current){toast("This claim no longer exists");return;}current.claim_name=value;await DB.put("batches",current);await loadAll();await markDataChanged();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast(value?"Claim name updated":"Claim name cleared");});
   });
   if(!isCancelled)sc.querySelectorAll(".claim-row").forEach(r=>r.addEventListener("click",()=>itemOutcomeSheet(r.dataset.be,r.dataset.entry,batchId)));
   sc.querySelector("#claimSheetBtn").addEventListener("click",()=>exportClaimSheet(batchId));
@@ -1921,8 +1932,8 @@ function reimburseBatchSheet(batchId,items,sc){
     const btn=q("#rbConfirm");if(btn.dataset.busy)return;btn.dataset.busy="1";btn.disabled=true;
     try{const inspection=await inspectBatchReimbursement(batchId);if(inspection.details.length){
         openSheet(`<h3>Claim items changed</h3><p class="hint">Some claim items changed in the Log.<br><br>Update them to match the Log and reimburse all pending items?</p><div class="summary" style="margin:12px 0;">${inspection.details.map(x=>`<div class="srow"><span class="k">${esc(x.label)}</span><span class="v">${esc(x.fields.join(", "))}</span></div>`).join("")}</div><button class="btn btn-positive" id="syncAllYes">Update &amp; reimburse all</button><button class="btn btn-ghost" id="syncAllNo" style="margin-top:10px;">Cancel</button>`);
-        document.querySelector("#syncAllNo").addEventListener("click",closeSheet);document.querySelector("#syncAllYes").addEventListener("click",async()=>{const yes=document.querySelector("#syncAllYes");if(yes.dataset.busy)return;yes.dataset.busy="1";yes.disabled=true;try{await reimburseBatchWithSyncAtomic(batchId,date,slipUrl,slipType,inspection.mismatches,inspection.snapshots);await loadAll();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("All items reimbursed");}catch(e){console.error("Synchronized batch reimbursement failed",e);toast(e.message||"Claim could not be reimbursed");delete yes.dataset.busy;yes.disabled=false;}});return;
-      }await markBatchReimbursedAtomic(batchId,date,slipUrl,slipType);await loadAll();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("Batch reimbursed");}
+        document.querySelector("#syncAllNo").addEventListener("click",closeSheet);document.querySelector("#syncAllYes").addEventListener("click",async()=>{const yes=document.querySelector("#syncAllYes");if(yes.dataset.busy)return;yes.dataset.busy="1";yes.disabled=true;try{await reimburseBatchWithSyncAtomic(batchId,date,slipUrl,slipType,inspection.mismatches,inspection.snapshots);await loadAll();await markDataChanged();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("All items reimbursed");}catch(e){console.error("Synchronized batch reimbursement failed",e);toast(e.message||"Claim could not be reimbursed");delete yes.dataset.busy;yes.disabled=false;}});return;
+      }await markBatchReimbursedAtomic(batchId,date,slipUrl,slipType);await loadAll();await markDataChanged();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("Batch reimbursed");}
     catch(e){console.error("Batch reimbursement failed",e);toast(e.message||"Claim could not be updated");delete btn.dataset.busy;btn.disabled=false;}
   });
 }
@@ -1935,7 +1946,7 @@ function undoReimbursement(batchId,sc){
   document.querySelector("#undoNo").addEventListener("click",closeSheet);
   document.querySelector("#undoYes").addEventListener("click",async()=>{
     const btn=document.querySelector("#undoYes");if(btn.dataset.busy)return;btn.dataset.busy="1";btn.disabled=true;
-    try{await undoReimbursementAtomic(batchId);await loadAll();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("Reimbursement undone");}
+    try{await undoReimbursementAtomic(batchId);await loadAll();await markDataChanged();refreshCurrent();closeSheet();closeScreen(sc);setTimeout(()=>openBatchDetail(batchId),260);toast("Reimbursement undone");}
     catch(e){console.error("Undo reimbursement failed",e);toast(e.message||"Reimbursement could not be undone");delete btn.dataset.busy;btn.disabled=false;}
   });
 }
@@ -1950,7 +1961,7 @@ function cancelClaim(batchId,sc){
   document.querySelector("#cancelNo").addEventListener("click",closeSheet);
   document.querySelector("#cancelYes").addEventListener("click",async()=>{
     const btn=document.querySelector("#cancelYes");if(btn.dataset.busy)return;btn.dataset.busy="1";btn.disabled=true;
-    try{await cancelClaimAtomic(batchId);await loadAll();refreshCurrent();closeSheet();closeScreen(sc);toast("Claim cancelled");}
+    try{await cancelClaimAtomic(batchId);await loadAll();await markDataChanged();refreshCurrent();closeSheet();closeScreen(sc);toast("Claim cancelled");}
     catch(e){console.error("Claim cancellation failed",e);toast(e.message||"Claim could not be cancelled");delete btn.dataset.busy;btn.disabled=false;}
   });
 }
@@ -1977,9 +1988,9 @@ async function itemOutcomeSheet(beId,entryId,batchId){
       const canSync=(cur==="pending"&&["reimbursed","rejected"].includes(requested))||(cur==="rejected"&&["pending","reimbursed"].includes(requested));
       if(!cmp.matches&&canSync){const action=requested==="reimbursed"?"reimburse":requested==="rejected"?"reject":"reset to pending",lead=cur==="rejected"&&requested==="reimbursed"?"This Log entry changed after it was rejected.":"This claim item no longer matches the Log.";
         openSheet(`<h3>Update claim item?</h3><p class="hint">${lead}<br><br>Update the claim item to match the Log and ${action} it?</p><div class="summary" style="margin:12px 0;">${cmp.changedFields.map(x=>`<div class="srow"><span class="k">Changed</span><span class="v">${esc(x)}</span></div>`).join("")}</div><button class="btn ${requested==="reimbursed"?"btn-positive":"btn-primary"}" id="syncYes">Update &amp; ${action}</button><button class="btn btn-ghost" id="syncNo" style="margin-top:10px;">Cancel</button>`);
-        document.querySelector("#syncNo").addEventListener("click",closeSheet);document.querySelector("#syncYes").addEventListener("click",async()=>{const yes=document.querySelector("#syncYes");if(yes.dataset.busy)return;yes.dataset.busy="1";yes.disabled=true;try{await synchronizeAndSetOutcomeAtomic({batchId,batchEntryId:beId,expectedOutcome:cur,requestedOutcome:requested,expectedChangedFields:cmp.changedFields,expectedSnapshot:cmp.currentSnapshot});await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast(requested==="reimbursed"?"Claim item updated and reimbursed":requested==="rejected"?"Claim item updated and rejected":"Claim item updated and reset");}catch(e){console.error("Synchronized item transition failed",e);toast(e.message||"Item could not be updated");delete yes.dataset.busy;yes.disabled=false;}});return;
+        document.querySelector("#syncNo").addEventListener("click",closeSheet);document.querySelector("#syncYes").addEventListener("click",async()=>{const yes=document.querySelector("#syncYes");if(yes.dataset.busy)return;yes.dataset.busy="1";yes.disabled=true;try{await synchronizeAndSetOutcomeAtomic({batchId,batchEntryId:beId,expectedOutcome:cur,requestedOutcome:requested,expectedChangedFields:cmp.changedFields,expectedSnapshot:cmp.currentSnapshot});await loadAll();await markDataChanged();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast(requested==="reimbursed"?"Claim item updated and reimbursed":requested==="rejected"?"Claim item updated and rejected":"Claim item updated and reset");}catch(e){console.error("Synchronized item transition failed",e);toast(e.message||"Item could not be updated");delete yes.dataset.busy;yes.disabled=false;}});return;
       }
-      if(canSync)await synchronizeAndSetOutcomeAtomic({batchId,batchEntryId:beId,expectedOutcome:cur,requestedOutcome:requested,expectedChangedFields:[]});else await setItemOutcomeAtomic(beId,batchId,cur,requested);await loadAll();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Updated");}
+      if(canSync)await synchronizeAndSetOutcomeAtomic({batchId,batchEntryId:beId,expectedOutcome:cur,requestedOutcome:requested,expectedChangedFields:[]});else await setItemOutcomeAtomic(beId,batchId,cur,requested);await loadAll();await markDataChanged();refreshCurrent();closeSheet();closeTopScreen();setTimeout(()=>openBatchDetail(batchId),260);toast("Updated");}
     catch(e){console.error("Item outcome update failed",e);toast(e.message||"Item could not be updated");delete b.dataset.busy;b.disabled=false;}
   }));
 }
@@ -2178,13 +2189,13 @@ function companyForm(done,existing){
     const rec=existing?{...existing,name,default_currency:$("#cCur").value,color:selColor,code}
       :{id:uid(),name,default_currency:$("#cCur").value,color:selColor,code,archived:false,created_at:Date.now()};
     await DB.put("companies",rec);
-    await loadAll();closeSheet();done&&done();refreshCurrent();
+    await loadAll();await markDataChanged();closeSheet();done&&done();refreshCurrent();
     toast("Company saved");
   });
   $("#cDel")?.addEventListener("click",async()=>{
     const used=state.entries.some(e=>e.company_id===existing.id);
     if(used){toast("Can't delete — company has entries");return;}
-    await DB.del("companies",existing.id);await loadAll();closeSheet();done&&done();refreshCurrent();toast("Company deleted");
+    await DB.del("companies",existing.id);await loadAll();await markDataChanged();closeSheet();done&&done();refreshCurrent();toast("Company deleted");
   });
 }
 
@@ -2238,13 +2249,27 @@ function openSettings(){
 
 async function saveDestinations(){await DB.put("meta",{k:"travelDestinations",v:state.destinations.map(x=>({...x}))});}
 function openDestinations(){
-  const body=`<div class="hint" style="margin-bottom:12px;">Current global fuel rate: <strong>${money(state.fuelRateMinor,"THB")}/km</strong></div><div id="destList">${state.destinations.length?state.destinations.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<div class="sum-card dest-card" data-id="${p.id}"><h4>${esc(p.name)} ${p.is_default?'<span style="color:var(--jade);font-weight:500;">· Default</span>':''}</h4><div class="sum-row"><span>Total distance</span><span class="v">${p.distance_km} km</span></div><div class="sum-row"><span>Fuel rate</span><span class="v">${money(p.fuel_rate_minor,"THB")}/km</span></div><div class="sum-row"><span>Total amount</span><span class="v">${money(travelFuelMinor(p.distance_km,p.fuel_rate_minor)+(p.toll_minor||0),"THB")}</span></div><div class="dest-actions"><button class="btn btn-ghost btn-sm" data-edit="${p.id}">Edit</button><button class="btn btn-ghost btn-sm" data-del="${p.id}">Delete</button></div></div>`).join(""):`<div class="empty" style="padding:30px;"><p>No destinations yet.</p></div>`}</div><button class="btn btn-primary" id="addDestination">Add destination</button>`;
-  const sc=openScreen("Destinations",body);sc.querySelector("#addDestination").addEventListener("click",()=>destinationForm(null,sc));sc.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>destinationForm(state.destinations.find(x=>x.id===b.dataset.edit),sc)));sc.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",async()=>{const id=b.dataset.del;if(state.entries.some(e=>e.travel_preset_id===id)){toast("This destination is used by an existing Travel entry and cannot be deleted.");return;}state.destinations=state.destinations.filter(x=>x.id!==id);await saveDestinations();closeScreen(sc);setTimeout(openDestinations,260);toast("Destination deleted");}));
+  const body=`<div class="hint" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;"><span>Current global fuel rate: <strong>${money(state.fuelRateMinor,"THB")}/km</strong></span><button type="button" class="btn btn-ghost btn-sm" id="editGlobalRate" style="width:auto;flex:none;">Edit rate</button></div><div id="destList">${state.destinations.length?state.destinations.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<div class="sum-card dest-card" data-id="${p.id}"><h4>${esc(p.name)} ${p.is_default?'<span style="color:var(--jade);font-weight:500;">· Default</span>':''}</h4><div class="sum-row"><span>Total distance</span><span class="v">${p.distance_km} km</span></div><div class="sum-row"><span>Fuel rate</span><span class="v">${money(p.fuel_rate_minor,"THB")}/km</span></div><div class="sum-row"><span>Total amount</span><span class="v">${money(travelFuelMinor(p.distance_km,p.fuel_rate_minor)+(p.toll_minor||0),"THB")}</span></div><div class="dest-actions"><button class="btn btn-ghost btn-sm" data-edit="${p.id}">Edit</button><button class="btn btn-ghost btn-sm" data-del="${p.id}">Delete</button></div></div>`).join(""):`<div class="empty" style="padding:30px;"><p>No destinations yet.</p></div>`}</div><button class="btn btn-primary" id="addDestination">Add destination</button>`;
+  const sc=openScreen("Destinations",body);sc.querySelector("#addDestination").addEventListener("click",()=>destinationForm(null,sc));sc.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>destinationForm(state.destinations.find(x=>x.id===b.dataset.edit),sc)));sc.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",async()=>{const id=b.dataset.del;if(state.entries.some(e=>e.travel_preset_id===id)){toast("This destination is used by an existing Travel entry and cannot be deleted.");return;}state.destinations=state.destinations.filter(x=>x.id!==id);await saveDestinations();await markDataChanged();closeScreen(sc);setTimeout(openDestinations,260);toast("Destination deleted");}));
+  sc.querySelector("#editGlobalRate").addEventListener("click",()=>{
+    openSheet(`<h3>Global fuel rate</h3><div class="field"><label>Rate (THB/km)</label><input type="number" id="grRate" min="0" step="0.01" value="${(state.fuelRateMinor/100).toFixed(2)}"></div><div class="hint" style="margin-bottom:14px;">Used as the default for new custom travel entries. Does not change saved destinations or existing entries.</div><button class="btn btn-primary" id="grSave">Save</button>`);
+    $("#grSave").addEventListener("click",async()=>{
+      const val=Number($("#grRate").value);
+      const minor=Math.round(val*100);
+      if(!Number.isSafeInteger(minor)||minor<0){toast("Enter a valid rate");return;}
+      await DB.put("meta",{k:"travelFuelRateMinor",v:minor});
+      state.fuelRateMinor=minor;
+      await markDataChanged();
+      closeSheet();
+      closeScreen(sc);
+      setTimeout(openDestinations,260);
+    });
+  });
 }
 function destinationForm(existing,parent){
   const p=existing?{...existing}:{id:uid(),name:"",lat:null,lng:null,distance_km:0,fuel_rate_minor:state.fuelRateMinor,toll_minor:0,is_default:false};
   openSheet(`<h3>${existing?"Edit":"New"} destination</h3><div class="field"><label>Destination name</label><input id="dpName" value="${esc(p.name)}"></div><div class="field"><label>Total distance (km)</label><input type="number" min="0" step="0.1" id="dpDistance" value="${p.distance_km}"></div><div class="field"><label>Fuel rate (THB/km)</label><input type="number" min="0" step="0.01" id="dpRate" value="${(p.fuel_rate_minor/100).toFixed(2)}"></div><div class="field"><label>Toll (THB, optional)</label><input type="number" min="0" step="0.01" id="dpToll" value="${(p.toll_minor/100).toFixed(2)}"></div><div class="field"><label><input type="checkbox" id="dpDefault" ${p.is_default?"checked":""}> Default destination</label></div><div class="field"><label>Map pin <span class="opt">(optional)</span></label><button class="btn btn-ghost btn-sm" id="dpPin">${p.lat!=null?"Replace current pin":"Use current location"}</button><button class="btn btn-ghost btn-sm" id="dpClearPin" style="margin-top:6px;">Clear pin</button><div class="hint" id="dpCoords">${p.lat!=null?`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`:"No coordinates"}</div></div><button class="btn btn-primary" id="dpSave">Save destination</button>`);
-  $("#dpPin").addEventListener("click",()=>navigator.geolocation?.getCurrentPosition(pos=>{p.lat=pos.coords.latitude;p.lng=pos.coords.longitude;$("#dpCoords").textContent=`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;},()=>toast("Location permission denied"),{enableHighAccuracy:true,timeout:10000}));$("#dpClearPin").addEventListener("click",()=>{p.lat=null;p.lng=null;$("#dpCoords").textContent="No coordinates";});$("#dpSave").addEventListener("click",async()=>{p.name=$("#dpName").value.trim();p.distance_km=Math.round(Number($("#dpDistance").value)*10)/10;p.fuel_rate_minor=Math.round(Number($("#dpRate").value)*100);p.toll_minor=Math.round(Number($("#dpToll").value||0)*100);p.is_default=$("#dpDefault").checked;if(!p.name||!Number.isFinite(p.distance_km)||p.distance_km<0||!Number.isSafeInteger(p.fuel_rate_minor)||p.fuel_rate_minor<0||!Number.isSafeInteger(p.toll_minor)||p.toll_minor<0){toast("Check the destination values");return;}if(p.is_default)state.destinations.forEach(x=>x.is_default=false);const i=state.destinations.findIndex(x=>x.id===p.id);if(i<0)state.destinations.push(p);else state.destinations[i]=p;state.fuelRateMinor=p.fuel_rate_minor;await Promise.all([saveDestinations(),DB.put("meta",{k:"travelFuelRateMinor",v:state.fuelRateMinor})]);closeSheet();if(parent)closeScreen(parent);setTimeout(openDestinations,260);toast("Destination saved");});
+  $("#dpPin").addEventListener("click",()=>navigator.geolocation?.getCurrentPosition(pos=>{p.lat=pos.coords.latitude;p.lng=pos.coords.longitude;$("#dpCoords").textContent=`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;},()=>toast("Location permission denied"),{enableHighAccuracy:true,timeout:10000}));$("#dpClearPin").addEventListener("click",()=>{p.lat=null;p.lng=null;$("#dpCoords").textContent="No coordinates";});$("#dpSave").addEventListener("click",async()=>{p.name=$("#dpName").value.trim();p.distance_km=Math.round(Number($("#dpDistance").value)*10)/10;p.fuel_rate_minor=Math.round(Number($("#dpRate").value)*100);p.toll_minor=Math.round(Number($("#dpToll").value||0)*100);p.is_default=$("#dpDefault").checked;if(!p.name||!Number.isFinite(p.distance_km)||p.distance_km<0||!Number.isSafeInteger(p.fuel_rate_minor)||p.fuel_rate_minor<0||!Number.isSafeInteger(p.toll_minor)||p.toll_minor<0){toast("Check the destination values");return;}if(p.is_default)state.destinations.forEach(x=>x.is_default=false);const i=state.destinations.findIndex(x=>x.id===p.id);if(i<0)state.destinations.push(p);else state.destinations[i]=p;await saveDestinations();await markDataChanged();closeSheet();if(parent)closeScreen(parent);setTimeout(openDestinations,260);toast("Destination saved");});
 }
 
 function openTestingTools(){
@@ -2262,7 +2287,8 @@ function openTestingTools(){
   const sc=openScreen("Testing tools", body);
   sc.querySelector("#sSeed").addEventListener("click",seedExamples);
   sc.querySelector("#sWipe").addEventListener("click",()=>{
-    openSheet(`<h3>Clear all data?</h3><p class="hint" style="margin-bottom:14px;">Removes every entry, company, claim and receipt from this device. Cannot be undone.</p><button class="btn btn-danger" id="wipeYes">Clear everything</button><button class="btn btn-ghost" id="wipeNo" style="margin-top:10px;">Cancel</button>`);
+    openSheet(`<h3>Clear all data?</h3><p class="hint" style="margin-bottom:14px;">Removes every entry, company, claim and receipt from this device. Cannot be undone.</p><div class="field"><input type="text" id="wipeConfirm" placeholder="Type DELETE to confirm"></div><button class="btn btn-danger" id="wipeYes" disabled>Clear everything</button><button class="btn btn-ghost" id="wipeNo" style="margin-top:10px;">Cancel</button>`);
+    document.querySelector("#wipeConfirm").addEventListener("input",function(){document.querySelector("#wipeYes").disabled=this.value.trim()!=="DELETE";});
     document.querySelector("#wipeYes").addEventListener("click",async()=>{closeSheet();await wipeAllData();});
     document.querySelector("#wipeNo").addEventListener("click",closeSheet);
   });
@@ -2342,28 +2368,39 @@ async function replaceActiveAtomic(stores){return DB.runTransaction(APP_STORES,"
 async function exportBackup(){
   toast("Preparing backup…");
   const proofsRaw=await DB.getAll("proofs");
-  const proofs=[];
-  for(const p of proofsRaw){
-    proofs.push({id:p.id,entry_id:p.entry_id,file_type:p.file_type,name:p.name,added_at:p.added_at,
-      data:await blobToBase64(p.blob)});
+  const totalBytes=proofsRaw.reduce((sum,p)=>sum+(p.blob?.size||0),0);
+  async function doExport(){
+    const proofs=[];
+    for(const p of proofsRaw){
+      proofs.push({id:p.id,entry_id:p.entry_id,file_type:p.file_type,name:p.name,added_at:p.added_at,
+        data:await blobToBase64(p.blob)});
+    }
+    const data={
+      app:"ledger", version:2, exported_at:new Date().toISOString(),
+      companies:await DB.getAll("companies"),
+      entries:await DB.getAll("entries"),
+      tags:await DB.getAll("tags"),
+      batches:await DB.getAll("batches"),
+      batch_entries:await DB.getAll("batch_entries"),
+      edits:await DB.getAll("edits"),
+      meta:await DB.getAll("meta"),
+      proofs,
+    };
+    downloadFile(`claims_backup_${todayISO()}.json`, JSON.stringify(data), "application/json");
+    const now=Date.now();
+    await DB.put("meta",{k:"lastBackupAt",v:now});
+    state.lastBackupAt=now;
+    renderBackupBanner();
+    toast(`Backup saved · ${proofs.length} receipt${proofs.length!==1?"s":""} included`);
   }
-  const data={
-    app:"ledger", version:2, exported_at:new Date().toISOString(),
-    companies:await DB.getAll("companies"),
-    entries:await DB.getAll("entries"),
-    tags:await DB.getAll("tags"),
-    batches:await DB.getAll("batches"),
-    batch_entries:await DB.getAll("batch_entries"),
-    edits:await DB.getAll("edits"),
-    meta:await DB.getAll("meta"),
-    proofs,
-  };
-  downloadFile(`claims_backup_${todayISO()}.json`, JSON.stringify(data), "application/json");
-  const now=Date.now();
-  await DB.put("meta",{k:"lastBackupAt",v:now});
-  state.lastBackupAt=now;
-  renderBackupBanner();
-  toast(`Backup saved · ${proofs.length} receipt${proofs.length!==1?"s":""} included`);
+  if(totalBytes>50*1024*1024){
+    const mb=Math.round(totalBytes/(1024*1024));
+    openSheet(`<h3>Large backup</h3><p class="hint" style="margin-bottom:16px;">Your receipts add up to ${mb} MB. Creating one backup file this large may fail on a phone. You can still try, or reduce size by removing old receipt photos.</p><button class="btn btn-primary" id="bkpAnyway">Create backup anyway</button><button class="btn btn-ghost" id="bkpCancel" style="margin-top:10px;">Cancel</button>`);
+    $("#bkpAnyway").addEventListener("click",async()=>{await doExport();closeSheet();});
+    $("#bkpCancel").addEventListener("click",closeSheet);
+    return;
+  }
+  await doExport();
 }
 
 function importBackupLegacy(){
@@ -2500,9 +2537,12 @@ async function seedExamples(){
 }
 
 async function wipeAllData(){
-  const stores=["companies","entries","tags","batches","batch_entries","edits","proofs","meta"];
-  for(const s of stores){const all=await DB.getAll(s);for(const rec of all){const key=s==="tags"?rec.name:(s==="meta"?rec.k:rec.id);await DB.del(s,key);}}
-  await loadAll();$$("#screens .screen").forEach(x=>closeScreen(x));renderHome();
+  await DB.runTransaction(APP_STORES, "readwrite", async(s,t,req)=>{
+    for(const n of APP_STORES) await req(s[n].clear());
+  });
+  await loadAll();
+  $$("#screens .screen").forEach(x=>closeScreen(x));
+  renderHome();
   toast("All data cleared");
 }
 
