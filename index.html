@@ -514,6 +514,7 @@ async function markDataChanged(){
   await DB.put("meta", {k:"lastChangeAt", v: now});
   state.newestChange = Math.max(state.newestChange || 0, now);
   renderBackupBanner();
+  scheduleCloudBackup();
 }
 
 /* ============================================================
@@ -593,6 +594,9 @@ const state = {
   batchFilter:"active",
   activeClaimIds:new Map(),
   activeClaimIntegrity:new Set(),
+  dbxAuth:null,
+  lastCloudBackupAt:0,
+  dbxStatus:null,
 };
 
 async function loadAll(){
@@ -652,7 +656,7 @@ function timeAgo(ts){
   const h=Math.floor(m/60); if(h<24) return h+"h ago";
   const d=Math.floor(h/24); return d+" day"+(d>1?"s":"")+" ago";
 }
-function backupIsDue(){ return !!(state.hasData && (state.newestChange||0) > (state.lastBackupAt||0)); }
+function backupIsDue(){ return !!(state.hasData && (state.newestChange||0) > (state.lastBackupAt||0) && (state.newestChange||0) > (state.lastCloudBackupAt||0)); }
 function renderBackupBanner(){
   const el=$("#backupBanner"); if(!el) return;
   if(!backupIsDue()){ el.style.display="none"; el.innerHTML=""; return; }
@@ -1957,6 +1961,216 @@ function companyForm(done,existing){
 }
 
 /* ============================================================
+   DROPBOX CLOUD BACKUP
+   Public app-folder OAuth (PKCE, no client secret). Tokens live in
+   localStorage — NOT IndexedDB meta — so they never travel inside an
+   exported/restored backup file. All network calls are wrapped so a
+   failure here can never break the app or block boot.
+   ============================================================ */
+const DBX_CLIENT_ID = "9undfh6qltj78xy";
+const DBX_REDIRECT_URI = "https://natdu-git.github.io/claims/";
+const DBX_AUTH_KEY = "claimsDbxAuth";
+const DBX_WEEKDAYS = ["sun","mon","tue","wed","thu","fri","sat"];
+
+function dbxLoadAuth(){
+  try{ const raw = localStorage.getItem(DBX_AUTH_KEY); return raw ? JSON.parse(raw) : null; }
+  catch(e){ return null; }
+}
+function dbxSaveAuth(auth){
+  try{ localStorage.setItem(DBX_AUTH_KEY, JSON.stringify(auth)); }catch(e){ /* storage unavailable — ignore */ }
+}
+function dbxClearAuth(){
+  try{ localStorage.removeItem(DBX_AUTH_KEY); }catch(e){ /* ignore */ }
+}
+// Called once at startup (before the first paint) so the banner and Settings screen
+// reflect an existing Dropbox connection immediately.
+function loadCloudBackupState(){
+  const auth = dbxLoadAuth();
+  state.dbxAuth = auth;
+  state.lastCloudBackupAt = (auth && Number.isSafeInteger(auth.lastCloudBackupAt)) ? auth.lastCloudBackupAt : 0;
+}
+
+function dbxB64Url(bytes){
+  let bin=""; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function dbxRandomString(len){
+  const chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+  const arr=new Uint8Array(len); crypto.getRandomValues(arr);
+  let s=""; for(let i=0;i<len;i++) s+=chars[arr[i]%chars.length];
+  return s;
+}
+// Kicks off the PKCE flow — navigates away, so nothing after this runs.
+async function dbxStartConnect(){
+  try{
+    const verifier = dbxRandomString(64);
+    const nonce = dbxRandomString(24);
+    sessionStorage.setItem("claimsDbxVerifier", verifier);
+    sessionStorage.setItem("claimsDbxState", nonce);
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    const challenge = dbxB64Url(new Uint8Array(digest));
+    const url = "https://www.dropbox.com/oauth2/authorize?client_id="+encodeURIComponent(DBX_CLIENT_ID)
+      +"&response_type=code&code_challenge="+encodeURIComponent(challenge)
+      +"&code_challenge_method=S256&redirect_uri="+encodeURIComponent(DBX_REDIRECT_URI)
+      +"&state="+encodeURIComponent(nonce)+"&token_access_type=offline";
+    location.href = url;
+  }catch(e){ toast("Couldn't start Dropbox connect"); }
+}
+// Checked once from boot(), after renderHome(). Handles the redirect back from Dropbox.
+async function dbxHandleOAuthReturn(){
+  try{
+    const params = new URLSearchParams(location.search);
+    const code = params.get("code"), returnedState = params.get("state");
+    if(!code || !returnedState) return;
+    const expectedState = sessionStorage.getItem("claimsDbxState");
+    const verifier = sessionStorage.getItem("claimsDbxVerifier");
+    sessionStorage.removeItem("claimsDbxState"); sessionStorage.removeItem("claimsDbxVerifier");
+    history.replaceState(null,"",location.pathname);
+    if(!expectedState || returnedState!==expectedState || !verifier){ toast("Dropbox connection could not be verified"); return; }
+    const body = new URLSearchParams({code, grant_type:"authorization_code", client_id:DBX_CLIENT_ID, redirect_uri:DBX_REDIRECT_URI, code_verifier:verifier});
+    const res = await fetch("https://api.dropboxapi.com/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+    if(!res.ok) throw new Error("Dropbox token exchange failed");
+    const tok = await res.json();
+    const auth = {
+      refresh_token: tok.refresh_token,
+      access_token: tok.access_token,
+      expires_at: Date.now() + Math.max(0,(tok.expires_in||14400)-60)*1000,
+      account_email: null,
+      lastCloudBackupAt: state.lastCloudBackupAt||0,
+    };
+    dbxSaveAuth(auth); state.dbxAuth = auth; state.dbxStatus = null;
+    try{
+      const accRes = await fetch("https://api.dropboxapi.com/2/users/get_current_account",{method:"POST",headers:{"Authorization":"Bearer "+auth.access_token,"Content-Type":"application/json"},body:"null"});
+      if(accRes.ok){ const acc = await accRes.json(); auth.account_email = acc && acc.email || null; dbxSaveAuth(auth); state.dbxAuth = auth; }
+    }catch(e){ /* best-effort — connection still succeeded */ }
+    toast("Dropbox connected");
+  }catch(e){
+    history.replaceState(null,"",location.pathname);
+    toast("Couldn't connect to Dropbox");
+  }
+}
+let dbxRefreshInFlight = null;
+// Returns a valid access token, refreshing in the background when expired. Returns null
+// (and clears the stored connection) if the refresh token itself has been revoked.
+async function dbxAccessToken(){
+  const auth = state.dbxAuth;
+  if(!auth || !auth.refresh_token) return null;
+  if(auth.access_token && auth.expires_at && Date.now() < auth.expires_at) return auth.access_token;
+  if(dbxRefreshInFlight) return dbxRefreshInFlight;
+  dbxRefreshInFlight = (async()=>{
+    try{
+      const body = new URLSearchParams({grant_type:"refresh_token", refresh_token:auth.refresh_token, client_id:DBX_CLIENT_ID});
+      const res = await fetch("https://api.dropboxapi.com/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+      if(!res.ok){
+        if(res.status===400||res.status===401){ dbxClearAuth(); state.dbxAuth=null; state.dbxStatus="disconnected"; }
+        return null;
+      }
+      const tok = await res.json();
+      const updated = {...auth, access_token:tok.access_token, expires_at:Date.now()+Math.max(0,(tok.expires_in||14400)-60)*1000};
+      dbxSaveAuth(updated); state.dbxAuth = updated;
+      return updated.access_token;
+    }catch(e){ return null; }
+    finally{ dbxRefreshInFlight = null; }
+  })();
+  return dbxRefreshInFlight;
+}
+async function dbxDisconnect(){
+  const auth = state.dbxAuth;
+  if(auth && auth.access_token){
+    try{ await fetch("https://api.dropboxapi.com/2/auth/token/revoke",{method:"POST",headers:{"Authorization":"Bearer "+auth.access_token}}); }catch(e){ /* best-effort */ }
+  }
+  clearTimeout(cloudBackupTimer);
+  dbxClearAuth();
+  state.dbxAuth = null; state.lastCloudBackupAt = 0; state.dbxStatus = null;
+  renderBackupBanner();
+}
+
+let cloudBackupTimer = null;
+// Debounced trigger — fires ~2 minutes after the most recent change, resetting on each new one.
+function scheduleCloudBackup(){
+  if(!state.dbxAuth) return;
+  clearTimeout(cloudBackupTimer);
+  cloudBackupTimer = setTimeout(()=>{ cloudBackupNow(false); }, 2*60*1000);
+}
+
+async function dbxUploadOne(token, path, json){
+  return fetch("https://content.dropboxapi.com/2/files/upload",{
+    method:"POST",
+    headers:{
+      "Authorization":"Bearer "+token,
+      "Content-Type":"application/octet-stream",
+      "Dropbox-API-Arg": JSON.stringify({path, mode:"overwrite", mute:true}),
+    },
+    body: json,
+  });
+}
+async function dbxUploadBoth(token, ddd, json){
+  try{
+    const r1 = await dbxUploadOne(token, "/claims_backup_latest.json", json);
+    const r2 = await dbxUploadOne(token, `/claims_backup_${ddd}.json`, json);
+    if(r1.ok && r2.ok) return {success:true};
+    return {success:false, authFailed: r1.status===401||r2.status===401};
+  }catch(e){ return {success:false, authFailed:false}; }
+}
+let dbxUploadInFlight = false;
+// The one entry point for cloud backup — called from the debounce, the visibilitychange
+// trigger, and the manual "Back up now" button. manual=true surfaces toasts; automatic
+// (debounced/background) runs stay silent so the app is never chatty.
+async function cloudBackupNow(manual=false){
+  if(dbxUploadInFlight) return;
+  if(!state.dbxAuth){ if(manual) toast("Connect Dropbox first"); return; }
+  if(navigator.onLine===false){ if(manual) toast("You're offline"); return; }
+  dbxUploadInFlight = true;
+  try{
+    let json;
+    try{ json = await buildBackupJSON(); }
+    catch(e){ state.dbxStatus="failed"; renderBackupBanner(); if(manual) toast("Backup failed"); return; }
+    if(json.length > 140*1024*1024){
+      state.dbxStatus = "toolarge"; renderBackupBanner();
+      if(manual) toast("Backup too large for auto-upload — use manual export");
+      return;
+    }
+    const ddd = DBX_WEEKDAYS[new Date().getDay()];
+    let token = await dbxAccessToken();
+    if(!token){
+      state.dbxStatus = "disconnected"; renderBackupBanner();
+      if(manual) toast("Reconnect Dropbox in More → Data");
+      return;
+    }
+    let result = await dbxUploadBoth(token, ddd, json);
+    if(!result.success && result.authFailed){
+      const auth = state.dbxAuth; if(auth){ auth.expires_at = 0; dbxSaveAuth(auth); }
+      token = await dbxAccessToken();
+      if(token) result = await dbxUploadBoth(token, ddd, json);
+      else { state.dbxStatus = "disconnected"; renderBackupBanner(); if(manual) toast("Reconnect Dropbox in More → Data"); return; }
+    }
+    if(result.success){
+      const now = Date.now();
+      const auth = {...(state.dbxAuth||{}), lastCloudBackupAt: now};
+      dbxSaveAuth(auth); state.dbxAuth = auth; state.lastCloudBackupAt = now; state.dbxStatus = "ok";
+      renderBackupBanner();
+      if(manual) toast("Backed up to Dropbox");
+    }else{
+      state.dbxStatus = "failed"; renderBackupBanner();
+      if(manual) toast("Backup failed — will retry automatically");
+    }
+  } finally {
+    dbxUploadInFlight = false;
+  }
+}
+function dbxStatusLine(){
+  const auth = state.dbxAuth;
+  if(!auth) return "Not connected";
+  const who = auth.account_email ? `Connected as ${esc(auth.account_email)}` : "Connected";
+  const last = state.lastCloudBackupAt ? `Last cloud backup ${timeAgo(state.lastCloudBackupAt)}` : "No cloud backup yet";
+  let extra = "";
+  if(state.dbxStatus==="failed") extra = " · Last attempt failed — retries automatically";
+  else if(state.dbxStatus==="disconnected") extra = " · Dropbox disconnected — reconnect below";
+  else if(state.dbxStatus==="toolarge") extra = " · Backup too large for auto-upload — use manual export";
+  return `${who}<br>${last}${extra}`;
+}
+
+/* ============================================================
    SETTINGS / MORE
    ============================================================ */
 function openSettings(){
@@ -1976,6 +2190,13 @@ function openSettings(){
       <button id="sImport">Restore from backup <span class="check">↑</span></button>
     </div>
     <div class="hint" style="margin-top:10px;"><strong>${state.lastBackupAt?`Last backup ${timeAgo(state.lastBackupAt)}.`:"You haven’t made a backup yet."}</strong> Your data lives on this device only. A full backup packs <strong>everything — entries, companies, claims and receipt files</strong> — into one file. Save it to your cloud (Drive, Dropbox, email to yourself); if this phone is lost or the browser is cleared, Restore rebuilds the app from it.</div>
+
+    <div class="section-label">Cloud backup</div>
+    <div class="hint">${dbxStatusLine()}</div>
+    <div class="list-choice" style="margin-top:8px;">
+      ${state.dbxAuth?`<button id="sDbxNow">Back up now <span class="check">↑</span></button><button id="sDbxDisconnect" style="color:var(--danger)">Disconnect Dropbox <span class="check">×</span></button>`:`<button id="sDbxConnect">Connect Dropbox <span class="check">›</span></button>`}
+    </div>
+    <div class="hint" style="margin-top:8px;">Backups go to Dropbox → Apps → claims-backup. The last 7 days are kept (one file per weekday).</div>
 
     <div class="section-label">Testing tools</div>
     <div class="list-choice">
@@ -2001,6 +2222,16 @@ function openSettings(){
   });
   sc.querySelector("#sBackup").addEventListener("click",exportBackup);
   sc.querySelector("#sImport").addEventListener("click",importBackup);
+  const dbxConnectBtn=sc.querySelector("#sDbxConnect");
+  if(dbxConnectBtn) dbxConnectBtn.addEventListener("click",dbxStartConnect);
+  const dbxNowBtn=sc.querySelector("#sDbxNow");
+  if(dbxNowBtn) dbxNowBtn.addEventListener("click",()=>cloudBackupNow(true));
+  const dbxDiscBtn=sc.querySelector("#sDbxDisconnect");
+  if(dbxDiscBtn) dbxDiscBtn.addEventListener("click",()=>{
+    openSheet(`<h3>Disconnect Dropbox?</h3><p class="hint" style="margin-bottom:16px;">Stops automatic cloud backups. Your local data on this device is untouched.</p><button class="btn btn-danger" id="dbxDiscYes">Disconnect</button><button class="btn btn-ghost" id="dbxDiscNo" style="margin-top:10px;">Cancel</button>`);
+    $("#dbxDiscYes").addEventListener("click",async()=>{closeSheet();await dbxDisconnect();closeScreen(sc);toast("Dropbox disconnected");setTimeout(openSettings,260);});
+    $("#dbxDiscNo").addEventListener("click",closeSheet);
+  });
   sc.querySelector("#sTesting").addEventListener("click",openTestingTools);
 }
 
@@ -2124,33 +2355,40 @@ async function prepareNamedCopy(name,stores){await deleteNamedDB(name).catch(()=
 async function snapshotActive(){return DB.runTransaction(APP_STORES,"readonly",async(s,t,req)=>{const out={};for(const n of APP_STORES)out[n]=await req(s[n].getAll());return out;});}
 async function replaceActiveAtomic(stores){return DB.runTransaction(APP_STORES,"readwrite",async(s,t,req)=>{for(const n of APP_STORES){await req(s[n].clear());auditFail(`restore-after-clear-${n}`);}for(const n of APP_STORES)for(const rec of stores[n]){await req(s[n].put(rec));auditFail(`restore-after-put-${n}`);}});}
 
+// Builds the same validated JSON a full backup contains, without downloading it — shared by
+// the manual export (exportBackup) and the automatic Dropbox upload (cloudBackupNow).
+async function buildBackupJSON(){
+  const proofsRaw=await DB.getAll("proofs");
+  const proofs=[];
+  for(const p of proofsRaw){
+    proofs.push({id:p.id,entry_id:p.entry_id,file_type:p.file_type,name:p.name,added_at:p.added_at,
+      data:await blobToBase64(p.blob)});
+  }
+  const data={
+    app:"ledger", version:2, exported_at:new Date().toISOString(),
+    companies:await DB.getAll("companies"),
+    entries:await DB.getAll("entries"),
+    tags:await DB.getAll("tags"),
+    batches:await DB.getAll("batches"),
+    batch_entries:await DB.getAll("batch_entries"),
+    edits:await DB.getAll("edits"),
+    meta:await DB.getAll("meta"),
+    proofs,
+  };
+  return JSON.stringify(data);
+}
 async function exportBackup(){
   toast("Preparing backup…");
   const proofsRaw=await DB.getAll("proofs");
   const totalBytes=proofsRaw.reduce((sum,p)=>sum+(p.blob?.size||0),0);
   async function doExport(){
-    const proofs=[];
-    for(const p of proofsRaw){
-      proofs.push({id:p.id,entry_id:p.entry_id,file_type:p.file_type,name:p.name,added_at:p.added_at,
-        data:await blobToBase64(p.blob)});
-    }
-    const data={
-      app:"ledger", version:2, exported_at:new Date().toISOString(),
-      companies:await DB.getAll("companies"),
-      entries:await DB.getAll("entries"),
-      tags:await DB.getAll("tags"),
-      batches:await DB.getAll("batches"),
-      batch_entries:await DB.getAll("batch_entries"),
-      edits:await DB.getAll("edits"),
-      meta:await DB.getAll("meta"),
-      proofs,
-    };
-    downloadFile(`claims_backup_${todayISO()}.json`, JSON.stringify(data), "application/json");
+    const json=await buildBackupJSON();
+    downloadFile(`claims_backup_${todayISO()}.json`, json, "application/json");
     const now=Date.now();
     await DB.put("meta",{k:"lastBackupAt",v:now});
     state.lastBackupAt=now;
     renderBackupBanner();
-    toast(`Backup saved · ${proofs.length} receipt${proofs.length!==1?"s":""} included`);
+    toast(`Backup saved · ${proofsRaw.length} receipt${proofsRaw.length!==1?"s":""} included`);
   }
   if(totalBytes>50*1024*1024){
     const mb=Math.round(totalBytes/(1024*1024));
@@ -2328,7 +2566,10 @@ function refreshCurrent(){
    Wiring
    ============================================================ */
 $("#fab").addEventListener("click",()=>openAddEntry(null));
-document.addEventListener("visibilitychange",()=>{ if(!document.hidden) renderBackupBanner(); });
+document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden){ renderBackupBanner(); }
+  else if(state.dbxAuth && (state.newestChange||0) > (state.lastCloudBackupAt||0)){ cloudBackupNow(false); }
+});
 async function duplicateEntry(e){
   e=normalizeTravel(e);
   const allTags=(await DB.getAll("tags")).map(t=>t.name);
@@ -2518,8 +2759,10 @@ async function requestPersistentStorage(){
     await DB.open();
     requestPersistentStorage();
     await loadAll();
+    loadCloudBackupState();
     await migrateClaimIds();
     await renderHome();
+    try{ await dbxHandleOAuthReturn(); renderBackupBanner(); }catch(e){ /* never block boot */ }
     const pendingRestore=localStorage.getItem(RESTORE_MARKER);
     if(pendingRestore){
       setTimeout(()=>{openSheet(`<h3>Confirm restored data</h3><p class="hint" style="margin-bottom:14px;">Claims was interrupted during a restore. The restored data loaded successfully, and the previous data is still available as a recovery copy.</p><button class="btn btn-primary" id="keepRestored">Keep restored data</button><button class="btn btn-danger" id="bootRecover" style="margin-top:10px;">Restore previous data</button>`);
