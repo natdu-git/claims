@@ -502,7 +502,7 @@ function money(minor,cur){const v=(minor/100);return CUR_SYM[cur]+v.toLocaleStri
 function todayISO(){const d=new Date();const o=d.getTimezoneOffset();return new Date(d-o*60000).toISOString().slice(0,10);}
 const MONTHS_ABBR=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function fmtDate(iso){if(!iso)return"";const [y,m,d]=iso.split("-");return `${+d} ${MONTHS_ABBR[+m-1]||""} ${y}`;}
-function fmtDateShort(iso){if(!iso)return"";const [y,m,d]=iso.split("-");return `${+d} ${MONTHS_ABBR[+m-1]||""} ${y}`;}
+const fmtDateShort = fmtDate;
 function fmtDateText(iso){if(!iso)return"Pick a date";return fmtDate(iso);}
 
 function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),2200);}
@@ -708,7 +708,7 @@ function logRowHTML(e, noProof){
     ? `<div class="row-tags">${[...e.tags].sort((a,b)=>a.localeCompare(b)).slice(0,4).map(esc).join(", ")}${e.tags.length>4?`, +${e.tags.length-4}`:""}</div>` : "";
   const claimNo=state.activeClaimIds.get(e.id),claimWarning=state.activeClaimIntegrity.has(e.id);
   const claimMeta=claimWarning?`<span class="claim-id-part claim-id-inline claim-id-warning" title="Multiple active claim memberships detected" aria-label="Warning: multiple active claim memberships">⚠ claim conflict</span><span class="claim-separator"> · </span>`:claimNo?`<span class="claim-id-part claim-id-inline mono" title="Active claim ${esc(claimNo)}" aria-label="Active claim ${esc(claimNo)}">${esc(claimNo)}</span><span class="claim-separator"> · </span>`:"";
-  return `<div class="row" data-id="${e.id}">
+  return `<div class="row" data-id="${esc(e.id)}">
       <div class="accent st-${e.status}"></div>
       ${showNoProof?`<span class="noproof-top">⚠ no proof</span>`:""}
       <div class="body">
@@ -830,236 +830,6 @@ async function openAddEntry(existing){
   }
   const allTags=(await DB.getAll("tags")).map(t=>t.name);
   renderEntryFormCompact(allTags, !!existing);
-}
-
-function renderEntryForm(allTags, isEdit){
-  throw new Error("Legacy entry form is disabled; use renderEntryFormCompact");
-  const d=draft;
-  const isTravel=d.type==='travel';
-  const body=`
-    <div class="field">
-      <label>Company <span class="req">*</span></label>
-      <button class="pill on" id="pickCompany" style="width:100%;text-align:left;">${esc(companyName(d.company_id))} ▾</button>
-    </div>
-
-    <div class="field">
-      <label>Type <span class="req">*</span></label>
-      <div class="seg" id="typeSeg">
-        <button data-t="expense" class="${d.type==='expense'?'on':''}"><span class="ic">🧾</span>Expense</button>
-        <button data-t="travel" class="${d.type==='travel'?'on':''}"><span class="ic">📍</span>Travel</button>
-      </div>
-    </div>
-
-    <div class="field ${d.type==='travel'?'':'hidden'}" id="locField">
-      <label>Location <span class="opt">(travel)</span></label>
-      <div class="loc-box">
-        <div class="loc-coords" id="locCoords">${d.location_lat!=null?`${d.location_lat.toFixed(5)}, ${d.location_lng.toFixed(5)}`:"No location pinned"}</div>
-        <div class="btn-row">
-          <button class="btn btn-ghost btn-sm" id="pinBtn">📍 Pin current location</button>
-        </div>
-        <input type="text" id="locLabel" placeholder="Label (optional) e.g. Client office" value="${esc(d.location_label)}" style="margin-top:10px;">
-      </div>
-    </div>
-
-    <div class="field">
-      <label id="amountLabel">${isTravel?'Toll fees <span class="opt">(optional)</span>':'Amount <span class="req">*</span>'}</label>
-      <div class="amount-row">
-        <input type="number" inputmode="decimal" id="amount" placeholder="${isTravel?'0.00 (optional)':'0.00'}" value="${esc(d.amount_str)}" step="0.01">
-        <select id="currency">${CURRENCIES.map(c=>`<option ${c===d.currency?'selected':''}>${c}</option>`).join("")}</select>
-      </div>
-    </div>
-
-    <div class="field ${isTravel?'hidden':''}" id="vendorField">
-      <label>Vendor <span class="opt">(optional)</span></label>
-      <input type="text" id="vendor" placeholder="Who you paid" value="${esc(d.vendor)}">
-    </div>
-
-    <div class="field">
-      <label>Date of payment <span class="req">*</span></label>
-      <input type="date" id="payDate" value="${esc(d.payment_date)}" max="${todayISO()}">
-    </div>
-
-    <div class="field ${isTravel?'hidden':''}" id="tagsField">
-      <label>Tags <span class="opt">(optional)</span></label>
-      <div class="picker-list" id="tagList">
-        ${allTags.map(t=>`<button class="tag ${d.tags.includes(t)?'on':''}" data-tag="${esc(t)}">${esc(t)}</button>`).join("")}
-        <button class="tag add" id="addTag">+ New tag</button>
-      </div>
-    </div>
-
-    <div class="field ${isTravel?'hidden':''}" id="notesField">
-      <label>Notes <span class="opt">(optional)</span></label>
-      <textarea id="notes" placeholder="Anything worth remembering">${esc(d.notes)}</textarea>
-    </div>
-
-    <div class="field">
-      <label>Payment proof <span class="opt">(optional)</span></label>
-      <div class="proofs" id="proofList"></div>
-      <input type="file" id="fileInput" accept="image/*,application/pdf" multiple capture="environment" class="hidden">
-      <div class="hint">Photos or PDFs. Stored on this device only.</div>
-    </div>
-
-    <button class="btn btn-primary" id="saveEntry">${isEdit?"Save changes":"Review & save"}</button>
-    ${isEdit?`<button class="btn btn-danger" id="deleteEntry" style="margin-top:10px;">Delete entry</button>`:""}
-  `;
-  const screen=openScreen(isEdit?"Edit entry":"New entry", body);
-  wireEntryForm(screen, allTags, isEdit);
-}
-
-function wireEntryForm(screen, allTags, isEdit){
-  const d=draft;
-  const q=s=>screen.querySelector(s);
-
-  q("#pickCompany").addEventListener("click",()=>{
-    chooseSheet("Company",
-      state.companies.map(c=>({value:c.id,label:c.name})),
-      d.company_id,
-      v=>{ d.company_id=v;
-        const c=state.companies.find(x=>x.id===v);
-        if(c?.default_currency){d.currency=c.default_currency;q("#currency").value=c.default_currency;}
-        q("#pickCompany").textContent=companyName(v)+" ▾";
-      });
-  });
-
-  function applyTypeUI(){
-    const isTravel=d.type==="travel";
-    q("#locField").classList.toggle("hidden", !isTravel);
-    q("#vendorField").classList.toggle("hidden", isTravel);
-    q("#tagsField").classList.toggle("hidden", isTravel);
-    q("#notesField").classList.toggle("hidden", isTravel);
-    q("#amountLabel").innerHTML = isTravel ? 'Toll fees <span class="opt">(optional)</span>' : 'Amount <span class="req">*</span>';
-    q("#amount").placeholder = isTravel ? "0.00 (optional)" : "0.00";
-  }
-  q("#typeSeg").addEventListener("click",e=>{
-    const b=e.target.closest("button");if(!b)return;
-    d.type=b.dataset.t;
-    $$("#typeSeg button",screen).forEach(x=>x.classList.toggle("on",x===b));
-    applyTypeUI();
-  });
-
-  q("#pinBtn")?.addEventListener("click",()=>{
-    if(!navigator.geolocation){toast("Geolocation not available");return;}
-    q("#locCoords").textContent="Locating…";
-    navigator.geolocation.getCurrentPosition(
-      pos=>{d.location_lat=pos.coords.latitude;d.location_lng=pos.coords.longitude;
-        q("#locCoords").textContent=`${d.location_lat.toFixed(5)}, ${d.location_lng.toFixed(5)}`;
-        toast("Location pinned");},
-      err=>{q("#locCoords").textContent="Couldn't get location";toast("Location permission denied");},
-      {enableHighAccuracy:true,timeout:10000}
-    );
-  });
-
-  q("#tagList").addEventListener("click",e=>{
-    const b=e.target.closest(".tag");if(!b)return;
-    if(b.id==="addTag"){
-      openSheet(`<h3>New tag</h3><div class="field"><input type="text" id="newTagName" placeholder="Tag name" autofocus></div><button class="btn btn-primary" id="newTagSave">Add tag</button>`);
-      $("#newTagSave").addEventListener("click",async()=>{
-        const name=$("#newTagName").value.trim();if(!name){closeSheet();return;}
-        await DB.put("tags",{name});
-        if(!d.tags.includes(name))d.tags.push(name);
-        closeSheet();
-        // re-render tag list
-        const tags=(await DB.getAll("tags")).map(t=>t.name);
-        const tl=q("#tagList");
-        tl.innerHTML=tags.map(t=>`<button class="tag ${d.tags.includes(t)?'on':''}" data-tag="${esc(t)}">${esc(t)}</button>`).join("")+`<button class="tag add" id="addTag">+ New tag</button>`;
-      });
-      return;
-    }
-    const t=b.dataset.tag;
-    if(d.tags.includes(t))d.tags=d.tags.filter(x=>x!==t);else d.tags.push(t);
-    b.classList.toggle("on");
-  });
-
-  // proofs
-  const fileInput=q("#fileInput");
-  function renderProofs(){
-    const pl=q("#proofList");
-    pl.innerHTML=d._proofs.map((p,i)=>{
-      const isImg=p.file_type&&p.file_type.startsWith("image");
-      const url=isImg?URL.createObjectURL(p.blob):null;
-      return `<div class="proof-thumb">${isImg?`<img src="${url}">`:`<span class="pdf">PDF</span>`}<span class="del" data-i="${i}">×</span></div>`;
-    }).join("")+`<button class="add-proof" id="addProof"><span class="plus">+</span>Add</button>`;
-    q("#addProof").addEventListener("click",()=>fileInput.click());
-    $$(".proof-thumb .del",pl).forEach(x=>x.addEventListener("click",()=>{d._proofs.splice(+x.dataset.i,1);renderProofs();}));
-  }
-  fileInput.addEventListener("change",()=>{
-    const files=[...fileInput.files];
-    fileInput.value="";
-    ingestProofs(files, renderProofs);
-  });
-  renderProofs();
-
-  q("#saveEntry").addEventListener("click",()=>collectAndSave(screen,isEdit));
-  q("#deleteEntry")?.addEventListener("click",()=>confirmDelete(d.id,screen));
-}
-
-function readForm(screen){
-  const q=s=>screen.querySelector(s);
-  const d=draft;
-  d.amount_str=q("#amount").value.trim();
-  d.currency=q("#currency").value;
-  d.vendor=q("#vendor").value.trim();
-  d.payment_date=q("#payDate").value;
-  d.notes=q("#notes").value.trim();
-  d.location_label=q("#locLabel")?.value.trim()||"";
-}
-
-async function collectAndSave(screen,isEdit){
-  readForm(screen);
-  const d=draft;
-  const isTravel=d.type==='travel';
-  const amt=parseFloat(d.amount_str);
-  if(!d.company_id){toast("Choose a company");return;}
-  if(isTravel){
-    if(!d.location_label){toast("Enter a destination");return;}
-    d.amount_minor=(amt&&amt>0)?Math.round(amt*100):0;
-    d.vendor="";d.notes="";d.tags=[];
-  }else{
-    if(!amt||amt<=0){toast("Enter an amount");return;}
-    d.amount_minor=Math.round(amt*100);
-    d.location_lat=null;d.location_lng=null;d.location_label="";
-  }
-  if(!d.payment_date){toast("Choose a date");return;}
-
-  if(isEdit){ await saveEntry(isEdit); closeScreen(screen); return; }
-
-  // NEW → show summary/confirm screen first
-  showSummary(screen);
-}
-
-function showSummary(formScreen){
-  const d=draft;
-  const isTravel=d.type==="travel";
-  const amountRow = isTravel
-    ? ["Toll fees", d.amount_minor>0?money(d.amount_minor,d.currency):"No toll", true]
-    : ["Amount", money(d.amount_minor,d.currency), true];
-  const rows=[
-    ["Company", companyName(d.company_id)],
-    ["Type", d.type[0].toUpperCase()+d.type.slice(1)],
-    isTravel&&d.location_lat!=null?["Location",(d.location_label?d.location_label+" · ":"")+`${d.location_lat.toFixed(4)}, ${d.location_lng.toFixed(4)}`]:null,
-    amountRow,
-    d.vendor?["Vendor",d.vendor]:null,
-    ["Date", fmtDate(d.payment_date)],
-    d.tags.length?["Tags",d.tags.join(", ")]:null,
-    d.notes?["Notes",d.notes]:null,
-    ["Proof", d._proofs.length?`${d._proofs.length} file${d._proofs.length>1?"s":""}`:"⚠ none attached"],
-  ].filter(Boolean);
-  const body=`
-    <div class="summary">
-      ${rows.map(r=>`<div class="srow"><span class="k">${esc(r[0])}</span><span class="v ${r[2]?'big mono':''}">${esc(r[1])}</span></div>`).join("")}
-    </div>
-    ${d._proofs.length===0?`<div class="warn">No payment proof attached. You can still save and add it later.</div>`:""}
-    <button class="btn btn-primary" id="confirmSave">Confirm & save</button>
-    <button class="btn btn-ghost" id="backEdit" style="margin-top:10px;">Back to edit</button>
-  `;
-  const sc=openScreen("Review", body);
-  sc.querySelector("#confirmSave").addEventListener("click",async()=>{
-    await saveEntry(false);
-    closeScreen(sc);
-    closeScreen(formScreen);
-    toast("Entry saved");
-  });
-  sc.querySelector("#backEdit").addEventListener("click",()=>closeScreen(sc));
 }
 
 async function saveEntry(isEdit){
@@ -1442,19 +1212,6 @@ function summarizeChanges(ch){
   }).join(", ");
 }
 
-function changeStatusSheet(e){
-  chooseSheet("Set status",
-    [{value:"unclaimed",label:"Unclaimed"},{value:"submitted",label:"Submitted"},{value:"reimbursed",label:"Reimbursed"}],
-    e.status,
-    async v=>{
-      e.status=v; await DB.put("entries",e);
-      await loadAll(); refreshCurrent();
-      // refresh detail
-      closeTopScreen(); setTimeout(()=>openDetail(e.id),260);
-      toast("Status updated");
-    });
-}
-
 /* ============================================================
    CLAIM builder
    ============================================================ */
@@ -1489,7 +1246,7 @@ async function renderClaim(){
   const rows=list.map(e=>{
     const sel=claimState.selected.has(e.id);
     const noProof=!pc[e.id];
-    return `<div class="claim-row ${sel?'sel':''}" data-id="${e.id}">
+    return `<div class="claim-row ${sel?'sel':''}" data-id="${esc(e.id)}">
       <div class="cbox">${sel?'✓':''}</div>
       <div class="info">
         <div class="t">${esc(entryDisplayName(e))} ${noProof?'<span class="noproof">⚠</span>':''}</div>
@@ -1691,7 +1448,7 @@ async function openBatchesTab(){
     const claimName=typeof b.claim_name==="string"?b.claim_name.trim():"",companyItems=`${esc(companyName(b.company_id))} · ${items.length} item${items.length!==1?"s":""}`;
     const firstLeft=claimName?`<span class="claim-date">${fmtDateShort(b.submitted_date)} ·</span><span class="claim-name">${esc(claimName)}</span>`:`<span class="claim-date">${fmtDateShort(b.submitted_date)} ·</span><span class="claim-id mono">${esc(b.claim_no||"")}</span>`;
     const secondLeft=claimName?`<span class="claim-id mono">${esc(b.claim_no||"")}</span><span class="batch-company-items"> · ${companyItems}</span>`:companyItems;
-    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${b.id}"><div class="batch-card-grid"><div class="left claim-line">${firstLeft}</div><div class="right total">${amountLine(amounts.submitted)}</div><div class="left ${claimName?"batch-ident-line":""}">${secondLeft}</div><div class="right ${cls}">${statusTag}</div><div class="left">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)}</div><div class="right outcomes">${outcome}</div></div></div>`;
+    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${esc(b.id)}"><div class="batch-card-grid"><div class="left claim-line">${firstLeft}</div><div class="right total">${amountLine(amounts.submitted)}</div><div class="left ${claimName?"batch-ident-line":""}">${secondLeft}</div><div class="right ${cls}">${statusTag}</div><div class="left">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)}</div><div class="right outcomes">${outcome}</div></div></div>`;
   }).join("");
   let body;
   if(batches.length===0){
@@ -1717,7 +1474,7 @@ async function openBatchDetail(batchId){
     const live=state.entries.find(e=>e.id===be.entry_id),cmp=live?snapshotComparison(live,be,batchCompany):null;
     const ocClass={pending:"st-submitted-c",reimbursed:"st-reimbursed-c",rejected:"st-rejected-c"}[oc];
     const ocLabel={pending:"Pending",reimbursed:"Reimbursed",rejected:"Rejected → unclaimed"}[oc];
-    return `<div class="claim-row" data-be="${be.id}" data-entry="${be.entry_id}" style="cursor:${isCancelled?"default":"pointer"};">
+    return `<div class="claim-row" data-be="${esc(be.id)}" data-entry="${esc(be.entry_id)}" style="cursor:${isCancelled?"default":"pointer"};">
       <div class="info">
         <div class="t">${esc(snapshotDisplayName(be))}</div>
         <div class="s">${fmtDateShort(be.date_snapshot)} · <span class="mini-tag ${ocClass}">${ocLabel}</span>${cmp&&!cmp.matches?` · <span class="mini-tag st-rejected-c">Log changed: ${esc(cmp.changedFields.join(", "))}</span>`:""}</div>
@@ -2095,7 +1852,7 @@ async function exportClaimSheet(batchId){
 /* ============================================================
    CSV export
    ============================================================ */
-function csvEscape(v){v=String(v??"");return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+function csvEscape(v){v=String(v??"");if(/^[=+\-@]/.test(v))v="'"+v;return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
 function downloadFile(name,content,type){
   const blob=new Blob([content],{type});
   const url=URL.createObjectURL(blob);
@@ -2158,9 +1915,9 @@ async function openCompanies(firstRun){
     }
     if(banner)banner.style.display="none";
     if(startBtn)startBtn.style.display="";
-    cl.innerHTML=state.companies.map(c=>`<div class="claim-row" data-id="${c.id}">
+    cl.innerHTML=state.companies.map(c=>`<div class="claim-row" data-id="${esc(c.id)}">
       <div class="info"><div class="t"><span class="co-dot" style="background:${c.color||'#b4b2a9'}"></span>${esc(c.name)}</div><div class="s">Default currency: ${c.default_currency||state.defaultCurrency}</div></div>
-      <button class="tag" data-edit="${c.id}">Edit</button>
+      <button class="tag" data-edit="${esc(c.id)}">Edit</button>
     </div>`).join("");
     cl.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>companyForm(()=>{refresh();},state.companies.find(x=>x.id===b.dataset.edit))));
   }
@@ -2249,16 +2006,18 @@ function openSettings(){
 
 async function saveDestinations(){await DB.put("meta",{k:"travelDestinations",v:state.destinations.map(x=>({...x}))});}
 function openDestinations(){
-  const body=`<div class="hint" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;"><span>Current global fuel rate: <strong>${money(state.fuelRateMinor,"THB")}/km</strong></span><button type="button" class="btn btn-ghost btn-sm" id="editGlobalRate" style="width:auto;flex:none;">Edit rate</button></div><div id="destList">${state.destinations.length?state.destinations.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<div class="sum-card dest-card" data-id="${p.id}"><h4>${esc(p.name)} ${p.is_default?'<span style="color:var(--jade);font-weight:500;">· Default</span>':''}</h4><div class="sum-row"><span>Total distance</span><span class="v">${p.distance_km} km</span></div><div class="sum-row"><span>Fuel rate</span><span class="v">${money(p.fuel_rate_minor,"THB")}/km</span></div><div class="sum-row"><span>Total amount</span><span class="v">${money(travelFuelMinor(p.distance_km,p.fuel_rate_minor)+(p.toll_minor||0),"THB")}</span></div><div class="dest-actions"><button class="btn btn-ghost btn-sm" data-edit="${p.id}">Edit</button><button class="btn btn-ghost btn-sm" data-del="${p.id}">Delete</button></div></div>`).join(""):`<div class="empty" style="padding:30px;"><p>No destinations yet.</p></div>`}</div><button class="btn btn-primary" id="addDestination">Add destination</button>`;
+  const body=`<div class="hint" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;"><span>Current global fuel rate: <strong>${money(state.fuelRateMinor,"THB")}/km</strong></span><button type="button" class="btn btn-ghost btn-sm" id="editGlobalRate" style="width:auto;flex:none;">Edit rate</button></div><div id="destList">${state.destinations.length?state.destinations.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<div class="sum-card dest-card" data-id="${esc(p.id)}"><h4>${esc(p.name)} ${p.is_default?'<span style="color:var(--jade);font-weight:500;">· Default</span>':''}</h4><div class="sum-row"><span>Total distance</span><span class="v">${p.distance_km} km</span></div><div class="sum-row"><span>Fuel rate</span><span class="v">${money(p.fuel_rate_minor,"THB")}/km</span></div><div class="sum-row"><span>Total amount</span><span class="v">${money(travelFuelMinor(p.distance_km,p.fuel_rate_minor)+(p.toll_minor||0),"THB")}</span></div><div class="dest-actions"><button class="btn btn-ghost btn-sm" data-edit="${esc(p.id)}">Edit</button><button class="btn btn-ghost btn-sm" data-del="${esc(p.id)}">Delete</button></div></div>`).join(""):`<div class="empty" style="padding:30px;"><p>No destinations yet.</p></div>`}</div><button class="btn btn-primary" id="addDestination">Add destination</button>`;
   const sc=openScreen("Destinations",body);sc.querySelector("#addDestination").addEventListener("click",()=>destinationForm(null,sc));sc.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>destinationForm(state.destinations.find(x=>x.id===b.dataset.edit),sc)));sc.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",async()=>{const id=b.dataset.del;if(state.entries.some(e=>e.travel_preset_id===id)){toast("This destination is used by an existing Travel entry and cannot be deleted.");return;}state.destinations=state.destinations.filter(x=>x.id!==id);await saveDestinations();await markDataChanged();closeScreen(sc);setTimeout(openDestinations,260);toast("Destination deleted");}));
   sc.querySelector("#editGlobalRate").addEventListener("click",()=>{
     openSheet(`<h3>Global fuel rate</h3><div class="field"><label>Rate (THB/km)</label><input type="number" id="grRate" min="0" step="0.01" value="${(state.fuelRateMinor/100).toFixed(2)}"></div><div class="hint" style="margin-bottom:14px;">Used as the default for new custom travel entries. Does not change saved destinations or existing entries.</div><button class="btn btn-primary" id="grSave">Save</button>`);
     $("#grSave").addEventListener("click",async()=>{
+      if($("#grRate").value.trim()===""){toast("Enter a rate");return;}
       const val=Number($("#grRate").value);
       const minor=Math.round(val*100);
       if(!Number.isSafeInteger(minor)||minor<0){toast("Enter a valid rate");return;}
       await DB.put("meta",{k:"travelFuelRateMinor",v:minor});
       state.fuelRateMinor=minor;
+      toast("Global fuel rate updated");
       await markDataChanged();
       closeSheet();
       closeScreen(sc);
@@ -2335,7 +2094,7 @@ function normalizeBackup(data){
   if(data.exported_at!=null&&(typeof data.exported_at!=="string"||isNaN(Date.parse(data.exported_at))))throw restoreError(stage,"The export timestamp is invalid");
   for(const n of APP_STORES)if(!Array.isArray(data[n]))throw restoreError(stage,`Backup store '${n}' is missing`,n);
   const seen={};for(const n of APP_STORES)seen[n]=new Set();
-  const unique=(store,key)=>{if(typeof key!=="string"||!key||key.length>200)throw restoreError(stage,`Invalid key in ${store}`,store,key);if(seen[store].has(key))throw restoreError(stage,`Duplicate key '${key}' in ${store}; current data was not changed`,store,key);seen[store].add(key);};
+  const unique=(store,key)=>{if(typeof key!=="string"||!key||key.length>200||!/^[^\x00-\x1f<>"'&\\]+$/.test(key))throw restoreError(stage,`Invalid key in ${store}`,store,key);if(seen[store].has(key))throw restoreError(stage,`Duplicate key '${key}' in ${store}; current data was not changed`,store,key);seen[store].add(key);};
   const currencies=new Set(["THB","RMB","USD"]),out={};
   out.companies=data.companies.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid company record","companies");unique("companies",x.id);if(!safeString(x.name,500)||!x.name.trim()||!currencies.has(x.default_currency)||typeof x.archived!=="boolean"||!finiteTime(x.created_at)||!/^#[0-9a-f]{6}$/i.test(x.color||"")||!/^[A-Z0-9]{1,6}$/.test(x.code||""))throw restoreError(stage,`Invalid company '${x.id}'`,"companies",x.id);return {...x,name:x.name.trim(),code:x.code.toUpperCase()};});
   out.entries=data.entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid entry record","entries");unique("entries",x.id);if(typeof x.company_id!=="string"||!["expense","travel"].includes(x.type)||!Number.isSafeInteger(x.amount_minor)||x.amount_minor<0||!currencies.has(x.currency)||(x.claim_thb_minor!=null&&(!Number.isSafeInteger(x.claim_thb_minor)||x.claim_thb_minor<0))||!validISODate(x.payment_date)||!["unclaimed","submitted","reimbursed"].includes(x.status)||!safeString(x.vendor)||!safeString(x.notes)||!safeString(x.location_label||"")||!Array.isArray(x.tags)||x.tags.some(t=>!safeString(t,500))||!validCoordPair(x.location_lat,x.location_lng)||!finiteTime(x.created_at)||!finiteTime(x.updated_at,true))throw restoreError(stage,`Invalid entry '${x.id}'`,"entries",x.id);validateTravelFields(x);return {...x,tags:[...x.tags]};});
