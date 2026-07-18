@@ -20,7 +20,7 @@
 // in index.html together on every deploy — the cache name below is derived from
 // it, and the update banner (index.html) uses a matching mechanism to notice a
 // new version has been installed.
-const APP_VERSION = "2026.07.18";
+const APP_VERSION = "2026.07.18b";
 
 // Name of the cache this version of the worker uses. Derived from APP_VERSION so
 // it changes automatically on every deploy, so the activate step below knows to

@@ -462,7 +462,7 @@
 /* ---------- constants ---------- */
 // Bump this AND the matching APP_VERSION constant in sw.js together on every deploy —
 // it's how the update banner (below) knows a new version is ready.
-const APP_VERSION = "2026.07.18";
+const APP_VERSION = "2026.07.18b";
 const CURRENCIES = ["THB","RMB","USD"];
 const CUR_SYM = {THB:"฿", RMB:"¥", USD:"$"};
 const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"Reimbursed"};
@@ -602,6 +602,7 @@ const state = {
   batchFilter:"active",
   activeClaimIds:new Map(),
   activeClaimIntegrity:new Set(),
+  proofCounts:new Map(),
   dbxAuth:null,
   lastCloudBackupAt:0,
   dbxStatus:null,
@@ -636,6 +637,12 @@ async function loadAll(){
   const lc = await DB.get("meta","lastChangeAt");
   state.newestChange = Math.max(newest, lc?.v || 0);
   state.hasData = state.entries.length>0 || state.companies.length>0;
+  // Proof-count cache: how many proofs each entry has, without holding the
+  // blobs themselves in memory. Rebuilt once per data (re)load so it stays
+  // correct after restore/wipe/seed.
+  const proofsForCount=await DB.getAll("proofs");
+  state.proofCounts=new Map();
+  proofsForCount.forEach(p=>state.proofCounts.set(p.entry_id,(state.proofCounts.get(p.entry_id)||0)+1));
 }
 function companyName(id){const c=state.companies.find(c=>c.id===id);return c?c.name:"—";}
 function entryDisplayName(e){return e.type==="travel"?(e.travel_destination||e.location_label||companyName(e.company_id)):(e.vendor||companyName(e.company_id));}
@@ -789,8 +796,6 @@ async function renderLog(){
     log.innerHTML=`<div class="empty"><h3>${anyEntries?"No matches":"No entries yet"}</h3><p>${anyEntries?"Try clearing a filter.":"Tap + to log your first expense."}</p></div>`;
     return;
   }
-  const allProofs=await DB.getAll("proofs");
-  const pc={};allProofs.forEach(p=>pc[p.entry_id]=(pc[p.entry_id]||0)+1);
   let html="", lastDay=null, open=false, firstInGroup=false;
   for(const e of list){
     if(e.payment_date!==lastDay){
@@ -801,7 +806,7 @@ async function renderLog(){
     }
     if(!firstInGroup) html+=`<div class="row-div"></div>`;  // inset divider between same-day rows
     firstInGroup=false;
-    html+=logRowHTML(e, !pc[e.id]);
+    html+=logRowHTML(e, !state.proofCounts.get(e.id));
   }
   if(open) html+=`</div>`;
   log.innerHTML=html;
@@ -923,6 +928,7 @@ async function saveEntry(isEdit){
   const keepIds=new Set(d._proofs.filter(p=>p._existing).map(p=>p.id));
   for(const p of existingProofs){ if(!keepIds.has(p.id)) await DB.del("proofs",p.id); }
   for(const p of d._proofs){ if(!p._existing){ await DB.put("proofs",{id:p.id,entry_id:d.id,blob:p.blob,file_type:p.file_type,name:p.name,added_at:now}); } }
+  state.proofCounts.set(d.id, d._proofs.length);
 
   // edit log
   if(isEdit && changes && Object.keys(changes).length){
@@ -952,7 +958,7 @@ function confirmDelete(id,screen){
     <button class="btn btn-ghost" id="delNo" style="margin-top:10px;">Cancel</button>`);
   $("#delYes").addEventListener("click",async()=>{
     const btn=$("#delYes");if(btn.dataset.busy)return;btn.dataset.busy="1";btn.disabled=true;
-    try{await deleteEntryAtomic(id);await loadAll();await markDataChanged();refreshCurrent();closeSheet();if(screen)closeScreen(screen);toast("Entry deleted");}
+    try{await deleteEntryAtomic(id);state.proofCounts.delete(id);await loadAll();await markDataChanged();refreshCurrent();closeSheet();if(screen)closeScreen(screen);toast("Entry deleted");}
     catch(e){console.error("Entry deletion failed",e);toast(e.message||"Entry could not be deleted");delete btn.dataset.busy;btn.disabled=false;}
   });
   $("#delNo").addEventListener("click",closeSheet);
@@ -1115,9 +1121,12 @@ function wireCompactForm(screen,isEdit){
     });
     document.querySelector("#tpDone").addEventListener("click",()=>{ closeSheet(); renderTags(); });
   }
+  let proofThumbUrls=[];
   function renderProofs(){
+    proofThumbUrls.forEach(u=>URL.revokeObjectURL(u));
+    proofThumbUrls=[];
     const pl=q("#cProofs");
-    pl.innerHTML=d._proofs.map((p,i)=>{const isImg=p.file_type&&p.file_type.startsWith("image");const url=isImg?URL.createObjectURL(p.blob):null;return `<div class="proof-thumb">${isImg?`<img src="${url}">`:`<span class="pdf">PDF</span>`}<span class="del" data-i="${i}">&#215;</span></div>`;}).join("")+`<button class="add-proof" id="cAddProof"><span class="plus">+</span>Add</button>`;
+    pl.innerHTML=d._proofs.map((p,i)=>{const isImg=p.file_type&&p.file_type.startsWith("image");const url=isImg?URL.createObjectURL(p.blob):null;if(url)proofThumbUrls.push(url);return `<div class="proof-thumb">${isImg?`<img src="${url}">`:`<span class="pdf">PDF</span>`}<span class="del" data-i="${i}">&#215;</span></div>`;}).join("")+`<button class="add-proof" id="cAddProof"><span class="plus">+</span>Add</button>`;
     q("#cAddProof").addEventListener("click",()=>q("#cFile").click());
     $$(".proof-thumb .del",pl).forEach(x=>x.addEventListener("click",()=>{d._proofs.splice(+x.dataset.i,1);renderProofs();}));
     $$(".proof-thumb img",pl).forEach(im=>{ im.style.cursor="pointer"; im.addEventListener("click",()=>viewImage(im.src)); });
@@ -2643,7 +2652,8 @@ function openSummary(){
   const add=(o,e)=>{const thb=claimThb(e),c=thb!=null?"THB":e.currency,v=thb!=null?thb:e.amount_minor;o.grand[c]=(o.grand[c]||0)+v;o[e.status][c]=(o[e.status][c]||0)+v;o.count++;};
   for(const e of list){
     add(overall,e);if(!byCompany.has(e.company_id))byCompany.set(e.company_id,empty());add(byCompany.get(e.company_id),e);
-    (e.tags||[]).forEach(t=>{byTag[t]=byTag[t]||{}; byTag[t][e.currency]=(byTag[t][e.currency]||0)+e.amount_minor;});
+    const tagThb=claimThb(e),tagC=tagThb!=null?"THB":e.currency,tagV=tagThb!=null?tagThb:e.amount_minor;
+    (e.tags||[]).forEach(t=>{byTag[t]=byTag[t]||{}; byTag[t][tagC]=(byTag[t][tagC]||0)+tagV;});
   }
   const curLine=obj=>{const ks=Object.keys(obj);return ks.length?ks.map(c=>money(obj[c],c)).join("  ·  "):"—";};
   const rows=obj=>Object.keys(obj).sort().map(k=>`<div class="sum-row"><span>${esc(k)}</span><span class="v">${curLine(obj[k])}</span></div>`).join("")||`<div class="sum-row"><span>No data yet</span><span></span></div>`;
@@ -2824,10 +2834,22 @@ async function requestPersistentStorage(){
     try{ await dbxHandleOAuthReturn(); renderBackupBanner(); }catch(e){ /* never block boot */ }
     const pendingRestore=localStorage.getItem(RESTORE_MARKER);
     if(pendingRestore){
-      setTimeout(()=>{openSheet(`<h3>Confirm restored data</h3><p class="hint" style="margin-bottom:14px;">Claims was interrupted during a restore. The restored data loaded successfully, and the previous data is still available as a recovery copy.</p><button class="btn btn-primary" id="keepRestored">Keep restored data</button><button class="btn btn-danger" id="bootRecover" style="margin-top:10px;">Restore previous data</button>`);
-        $("#keepRestored").addEventListener("click",async()=>{localStorage.removeItem(RESTORE_MARKER);await deleteNamedDB(RESTORE_STAGE_DB).catch(()=>{});await deleteNamedDB(RESTORE_RECOVERY_DB).catch(()=>{});closeSheet();toast("Restored data confirmed");});
-        $("#bootRecover").addEventListener("click",async()=>{try{await recoverPreviousData();}catch(e){console.error(e);toast("Recovery failed — do not clear browser data");}});
-      },450);
+      let phase=null; try{ phase=JSON.parse(pendingRestore).phase; }catch(e){}
+      if(phase==="active-committed"){
+        setTimeout(()=>{openSheet(`<h3>Confirm restored data</h3><p class="hint" style="margin-bottom:14px;">Claims was interrupted during a restore. The restored data loaded successfully, and the previous data is still available as a recovery copy.</p><button class="btn btn-primary" id="keepRestored">Keep restored data</button><button class="btn btn-danger" id="bootRecover" style="margin-top:10px;">Restore previous data</button>`);
+          $("#keepRestored").addEventListener("click",async()=>{localStorage.removeItem(RESTORE_MARKER);await deleteNamedDB(RESTORE_STAGE_DB).catch(()=>{});await deleteNamedDB(RESTORE_RECOVERY_DB).catch(()=>{});closeSheet();toast("Restored data confirmed");});
+          $("#bootRecover").addEventListener("click",async()=>{try{await recoverPreviousData();}catch(e){console.error(e);toast("Recovery failed — do not clear browser data");}});
+        },450);
+      }else if(phase==="recovery-ready"){
+        setTimeout(()=>{openSheet(`<h3>Restore didn't finish</h3><p class="hint" style="margin-bottom:14px;">A restore was interrupted before any data was changed. Your previous data is untouched and is what you see now.</p><button class="btn btn-primary" id="keepRestored">OK</button>`);
+          $("#keepRestored").addEventListener("click",async()=>{localStorage.removeItem(RESTORE_MARKER);await deleteNamedDB(RESTORE_STAGE_DB).catch(()=>{});await deleteNamedDB(RESTORE_RECOVERY_DB).catch(()=>{});closeSheet();toast("Restore cancelled — previous data kept");});
+        },450);
+      }else{
+        setTimeout(()=>{openSheet(`<h3>Confirm your data</h3><p class="hint" style="margin-bottom:14px;">Claims was interrupted during a restore and can't confirm whether it completed. Please check the entries shown before continuing.</p><button class="btn btn-primary" id="keepRestored">Keep current data</button><button class="btn btn-danger" id="bootRecover" style="margin-top:10px;">Restore previous data</button>`);
+          $("#keepRestored").addEventListener("click",async()=>{localStorage.removeItem(RESTORE_MARKER);await deleteNamedDB(RESTORE_STAGE_DB).catch(()=>{});await deleteNamedDB(RESTORE_RECOVERY_DB).catch(()=>{});closeSheet();toast("Restored data confirmed");});
+          $("#bootRecover").addEventListener("click",async()=>{try{await recoverPreviousData();}catch(e){console.error(e);toast("Recovery failed — do not clear browser data");}});
+        },450);
+      }
     }
     if(state.companies.length===0){ setTimeout(()=>openCompanies(true),400); }
     // Register the service worker so the app can launch offline and survive
