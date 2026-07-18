@@ -16,10 +16,16 @@
 // closed and reopened. There is no update UI here — that's for a later
 // phase. This phase is just about making offline launch work.
 
-// Name of the cache this version of the worker uses. Bump this string
-// whenever the list of precached files changes below, so the activate
-// step below knows to delete the old one.
-const CACHE = "claims-shell-v1";
+// App version for this deploy. Bump this AND the matching APP_VERSION constant
+// in index.html together on every deploy — the cache name below is derived from
+// it, and the update banner (index.html) uses a matching mechanism to notice a
+// new version has been installed.
+const APP_VERSION = "2026.07.18";
+
+// Name of the cache this version of the worker uses. Derived from APP_VERSION so
+// it changes automatically on every deploy, so the activate step below knows to
+// delete the old one.
+const CACHE = "claims-shell-" + APP_VERSION;
 
 // The exact set of files needed to start the app with zero network access.
 // Every path is relative (no leading "/") so this keeps working no matter
@@ -110,4 +116,14 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     caches.match(req).then((cached) => cached || fetch(req))
   );
+});
+
+// MESSAGE — the only way this worker ever takes over early. The page (index.html,
+// WO7) posts {type:"SKIP_WAITING"} only after the person taps the "Update" banner
+// action and the safety checks there pass. We never call skipWaiting() on our own
+// initiative — it happens exclusively in response to this user-triggered message.
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });

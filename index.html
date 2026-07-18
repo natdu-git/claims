@@ -177,6 +177,7 @@
   .lctl .tag-search{text-align:left;}
   .lbreak{border-top:1px solid var(--line);}
   #backupBanner{display:none;}
+  #updateBanner{display:none;}
   .bkp-inner{display:flex;align-items:center;gap:10px;justify-content:space-between;background:#fbe7e2;border:1px solid #e9c3b6;color:#8a3b22;border-radius:11px;padding:9px 12px;margin:10px 14px 0;font-size:12.5px;line-height:1.35;}
   .bkp-inner button{background:var(--jade);color:#fff;border-radius:8px;padding:7px 13px;font-size:12.5px;font-weight:600;white-space:nowrap;flex:none;}
   .date-wrap{position:relative;}
@@ -417,6 +418,7 @@
 </div>
 
 <div id="backupBanner"></div>
+<div id="updateBanner"></div>
 <div class="searchbar"><input type="search" id="searchInput" placeholder="Search vendor, tag, or note…" autocomplete="off"></div>
 <div class="filters" id="filters"></div>
 
@@ -458,6 +460,9 @@
    ============================================================ */
 
 /* ---------- constants ---------- */
+// Bump this AND the matching APP_VERSION constant in sw.js together on every deploy —
+// it's how the update banner (below) knows a new version is ready.
+const APP_VERSION = "2026.07.18";
 const CURRENCIES = ["THB","RMB","USD"];
 const CUR_SYM = {THB:"฿", RMB:"¥", USD:"$"};
 const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"Reimbursed"};
@@ -662,11 +667,56 @@ function timeAgo(ts){
 function backupIsDue(){ return !!(state.hasData && (state.newestChange||0) > (state.lastBackupAt||0) && (state.newestChange||0) > (state.lastCloudBackupAt||0)); }
 function renderBackupBanner(){
   const el=$("#backupBanner"); if(!el) return;
-  if(!backupIsDue()){ el.style.display="none"; el.innerHTML=""; return; }
-  const when = state.lastBackupAt ? `since your last backup ${timeAgo(state.lastBackupAt)}` : "and you haven’t backed up yet";
+  if(!backupIsDue()){ el.style.display="none"; el.innerHTML=""; }
+  else{
+    const when = state.lastBackupAt ? `since your last backup ${timeAgo(state.lastBackupAt)}` : "and you haven’t backed up yet";
+    el.style.display="block";
+    el.innerHTML=`<div class="bkp-inner"><span>⚠ You have changes ${when} — keep a copy off this phone.</span><button id="bkpNow">Back up</button></div>`;
+    $("#bkpNow").addEventListener("click",exportBackup);
+  }
+  // The backup banner takes priority over the update banner whenever both would
+  // otherwise be due, so re-check the update banner here too (its own due-ness
+  // doesn't change often, but the backup banner's does).
+  renderUpdateBanner();
+}
+
+/* ---------- update banner (PWA update, user-gated — see WO7) ---------- */
+// Set once we know a new service-worker version is installed and waiting. We never
+// apply it automatically — the person must tap "Update", and only when it's safe.
+let updateWaiting = false;
+let waitingWorker = null;
+let updateBannerDismissed = false; // session-only; reappears next launch
+let reloading = false; // guards against a double reload
+let backupExportInFlight = false; // set around exportBackup's actual file-writing step
+
+function renderUpdateBanner(){
+  const el=$("#updateBanner"); if(!el) return;
+  // The backup banner wins if both are due — show the update banner only when
+  // the backup banner isn't currently showing.
+  if(!updateWaiting || updateBannerDismissed || backupIsDue()){ el.style.display="none"; el.innerHTML=""; return; }
   el.style.display="block";
-  el.innerHTML=`<div class="bkp-inner"><span>⚠ You have changes ${when} — keep a copy off this phone.</span><button id="bkpNow">Back up</button></div>`;
-  $("#bkpNow").addEventListener("click",exportBackup);
+  el.innerHTML=`<div class="bkp-inner"><span>Update ready</span><span style="display:flex;gap:8px;align-items:center;"><button id="updateNow">Update</button><button id="updateDismiss" style="background:transparent;color:#8a3b22;font-weight:700;padding:4px 8px;">×</button></span></div>`;
+  $("#updateNow").addEventListener("click",applyUpdate);
+  $("#updateDismiss").addEventListener("click",()=>{ updateBannerDismissed=true; renderUpdateBanner(); });
+}
+
+// Runs the safety checks from WO7 §B5, then — only if all pass — tells the waiting
+// service worker to take over and reloads once. If any check fails, we toast and
+// leave the banner up so the person can retry once they're clear.
+function applyUpdate(){
+  if(localStorage.getItem(RESTORE_MARKER)){ toast("Finish the restore first"); return; }
+  if($("#sheetBack") && $("#sheetBack").classList.contains("show")){ toast("Close the open form first"); return; }
+  // Reviewer patch (WO7): the entry form is a full-screen "screen", not a sheet —
+  // catch it too (same test the app itself uses in syncFormOpen).
+  if($("#screens .screen.is-form")){ toast("Close the open form first"); return; }
+  if(dbxUploadInFlight || backupExportInFlight){ toast("Backup in progress — try again in a moment"); return; }
+  if(!waitingWorker || reloading) return;
+  navigator.serviceWorker.addEventListener("controllerchange", ()=>{
+    if(reloading) return;
+    reloading = true;
+    location.reload();
+  }, {once:true});
+  waitingWorker.postMessage({type:"SKIP_WAITING"});
 }
 
 function renderFilters(){
@@ -2208,6 +2258,7 @@ function openSettings(){
 
     <div class="section-label">About</div>
     <div class="hint">Claims · a personal, offline expense tracker. ${state.entries.length} entries · ${state.companies.length} companies stored locally.</div>
+    <div class="hint" style="color:var(--slate);">Version ${APP_VERSION}</div>
   `;
   const sc=openScreen("More", body);
   sc.querySelector("#sName").addEventListener("click",()=>promptClaimantName(()=>{ closeScreen(sc); openSettings(); }));
@@ -2385,13 +2436,18 @@ async function exportBackup(){
   const proofsRaw=await DB.getAll("proofs");
   const totalBytes=proofsRaw.reduce((sum,p)=>sum+(p.blob?.size||0),0);
   async function doExport(){
-    const json=await buildBackupJSON();
-    downloadFile(`claims_backup_${todayISO()}.json`, json, "application/json");
-    const now=Date.now();
-    await DB.put("meta",{k:"lastBackupAt",v:now});
-    state.lastBackupAt=now;
-    renderBackupBanner();
-    toast(`Backup saved · ${proofsRaw.length} receipt${proofsRaw.length!==1?"s":""} included`);
+    backupExportInFlight = true;
+    try{
+      const json=await buildBackupJSON();
+      downloadFile(`claims_backup_${todayISO()}.json`, json, "application/json");
+      const now=Date.now();
+      await DB.put("meta",{k:"lastBackupAt",v:now});
+      state.lastBackupAt=now;
+      renderBackupBanner();
+      toast(`Backup saved · ${proofsRaw.length} receipt${proofsRaw.length!==1?"s":""} included`);
+    } finally {
+      backupExportInFlight = false;
+    }
   }
   if(totalBytes>50*1024*1024){
     const mb=Math.round(totalBytes/(1024*1024));
@@ -2781,7 +2837,30 @@ async function requestPersistentStorage(){
     // doesn't support service workers.
     if("serviceWorker" in navigator){
       setTimeout(()=>{
-        navigator.serviceWorker.register("./sw.js").catch(e=>console.log("SW registration failed:",e));
+        navigator.serviceWorker.register("./sw.js").then(registration=>{
+          // A worker was already installed and waiting before this launch (e.g. we
+          // were closed when the last deploy landed) — the update banner can offer
+          // it right away.
+          if(registration.waiting){
+            waitingWorker = registration.waiting;
+            updateWaiting = true;
+            renderUpdateBanner();
+          }
+          // A new worker finished installing during this session. It only becomes
+          // "waiting" once every open tab's old worker is still in control, which
+          // is exactly what navigator.serviceWorker.controller tells us here.
+          registration.addEventListener("updatefound", ()=>{
+            const newWorker = registration.installing;
+            if(!newWorker) return;
+            newWorker.addEventListener("statechange", ()=>{
+              if(newWorker.state==="installed" && navigator.serviceWorker.controller){
+                waitingWorker = newWorker;
+                updateWaiting = true;
+                renderUpdateBanner();
+              }
+            });
+          });
+        }).catch(e=>console.log("SW registration failed:",e));
       },0);
     }
   }catch(err){
