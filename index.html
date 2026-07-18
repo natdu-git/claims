@@ -2774,6 +2774,16 @@ async function requestPersistentStorage(){
       },450);
     }
     if(state.companies.length===0){ setTimeout(()=>openCompanies(true),400); }
+    // Register the service worker so the app can launch offline and survive
+    // a cleared HTTP cache. This runs after first paint (setTimeout) so it
+    // never delays startup, and any failure is swallowed silently — the app
+    // must keep working exactly as before if this fails or the browser
+    // doesn't support service workers.
+    if("serviceWorker" in navigator){
+      setTimeout(()=>{
+        navigator.serviceWorker.register("./sw.js").catch(e=>console.log("SW registration failed:",e));
+      },0);
+    }
   }catch(err){
     document.body.innerHTML=`<div style="padding:40px;font-family:sans-serif;color:#16202b;">
       <h2>Storage unavailable</h2>
