@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#f2f0e9">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#FAF9F6" id="themeColorMeta">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Claims">
@@ -12,162 +12,159 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <title>Claims</title>
 <style>
-  :root{
-    --ink:#1f1e1d;
-    --ink-soft:#73716b;
-    --paper:#f2f0e9;
-    --surface:#ffffff;
-    --soft:#efece3;
-    --line:#e6e2d7;
-    --line-strong:#d3cfc2;
-    --line-soft:#efece4;
-    --jade:#c96442;
-    --jade-deep:#a94f33;
-    --slate:#8a887f;      /* unclaimed */
-    --amber:#b07636;      /* submitted / outstanding */
-    --green:#5f7a4d;      /* reimbursed */
-    --danger:#b3402f;
+  :root{ /* light — "Carbon Day" */
+    --bg:#FAF9F6; --surface:#FFFFFF;
+    --line:#E8E6E0; --line-strong:#D6D3CB;
+    --ink:#1A1A18; --ink-2:#5E5C56; --ink-3:#8A8880;
+    --accent:#0E8A63; --accent-press:#0B6E4F; --on-accent:#FFFFFF;
+    --st-unclaimed:#5E5C56; --st-submitted:#8A5F0A;
+    --st-reimbursed:#20714C; --st-rejected:#B03A2A;
     --mono:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
     --r:14px;
     --safe-b:env(safe-area-inset-bottom,0px);
-    --text-nav:12px;
-    --weight-regular:400;
-    --weight-medium:500;
-    --weight-semibold:600;
-    --weight-bold:700;
   }
+  html[data-theme="dark"]{ /* dark — "Carbon Night" */
+    --bg:#000000; --surface:#141414;
+    --line:#1C1C1C; --line-strong:#2E2E2E;
+    --ink:#F2F1EE; --ink-2:#9A9A96; --ink-3:#6E6E6A;
+    --accent:#46D0A3; --accent-press:#5FDBB2; --on-accent:#00160E;
+    --st-unclaimed:#B5B5B0; --st-submitted:#E8BE6A;
+    --st-reimbursed:#7ED6A9; --st-rejected:#F08A78;
+  }
+  :root{ /* mode-invariant */
+    --fs-caption:12px; --fs-meta:13px; --fs-body:15px; --fs-title:17px; --fs-amount:24px;
+    --r-sm:8px; --r-md:12px; --r-pill:999px;
+    --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px;
+  }
+  html{background:var(--bg);}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   html,body{margin:0;padding:0;}
   body{
     font-family:var(--sans);
-    background:var(--paper);
+    background:var(--bg);
     color:var(--ink);
-    font-size:16px;
+    font-size:var(--fs-body);
     line-height:1.4;
     -webkit-font-smoothing:antialiased;
     padding-bottom:calc(62px + var(--safe-b));
+    max-width:520px;margin:0 auto;
   }
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+  /* Inputs stay at 16px (not a --fs-* token) to prevent iOS Safari's auto-zoom-on-focus below 16px. */
   input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink);}
   .mono{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-0.02em;}
   .hidden{display:none !important;}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 
   /* ---------- Top bar ---------- */
   .topbar{
     position:sticky;top:0;z-index:20;
-    background:var(--surface);color:var(--ink);border-bottom:1px solid var(--line);
+    background:var(--bg);color:var(--ink);border-bottom:1px solid var(--line);
     padding:calc(env(safe-area-inset-top,0px) + 14px) 18px 16px;
   }
-  .topbar .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;font-size:12px;color:var(--ink-soft);}
-  .topbar .brand .dot{width:7px;height:7px;border-radius:2px;background:var(--jade);}
+  .topbar .brand{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;font-size:var(--fs-caption);color:var(--ink-2);}
+  .topbar .brand .dot{width:7px;height:7px;border-radius:2px;background:var(--accent);}
   .action-summary{display:flex;gap:18px;margin-top:14px;}
   .action-summary .side{width:50%;min-width:0;}
   .action-summary .side:last-child{text-align:right;}
-  .action-summary .lab{font-size:11.5px;color:var(--ink-soft);}
-  .action-summary .amounts{font-family:var(--mono);font-size:18px;font-weight:650;line-height:1.35;margin-top:3px;overflow-wrap:anywhere;}
+  .action-summary .lab{font-size:var(--fs-caption);color:var(--ink-2);}
+  .action-summary .amounts{font-family:var(--mono);font-size:var(--fs-title);font-weight:600;line-height:1.35;margin-top:3px;overflow-wrap:anywhere;}
 
   /* ---------- Filter chips ---------- */
-  .filters{display:flex;gap:8px;overflow-x:auto;padding:12px 14px;background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10;scrollbar-width:none;}
+  .filters{display:flex;gap:8px;overflow-x:auto;padding:12px 14px;background:var(--bg);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10;scrollbar-width:none;}
   .filters::-webkit-scrollbar{display:none;}
-  .chip{white-space:nowrap;border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 13px;font-size:13px;font-weight:500;color:var(--ink-soft);display:flex;align-items:center;gap:6px;}
-  .chip.active{background:var(--ink);color:#fff;border-color:var(--ink);}
-  .chip .x{font-size:15px;line-height:1;opacity:.7;}
+  .chip{white-space:nowrap;border:1px solid var(--line-strong);background:transparent;border-radius:var(--r-pill);padding:7px 13px;font-size:var(--fs-meta);font-weight:400;color:var(--ink-2);display:flex;align-items:center;gap:6px;}
+  .chip.active{background:transparent;color:var(--accent);border-color:var(--accent);}
+  .chip .x{font-size:var(--fs-body);line-height:1;opacity:.7;}
 
   /* ---------- Log rows ---------- */
   .log{padding:8px 0 0;}
-  .day-head{padding:16px 18px 6px;font-size:13px;font-weight:600;color:var(--ink-soft);}
-  .day-group{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r);overflow:hidden;margin:0 12px;}
-  .row{display:flex;align-items:stretch;position:relative;}
-  .row:active{background:#f6f8fa;}
-  .row .accent{width:5px;flex:none;}
-  .row-div{height:1px;background:var(--line-soft);margin-left:18px;}
-  .row .body{flex:1;min-width:0;padding:11px 13px;}
-  .noproof-top{position:absolute;top:9px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--amber);font-weight:600;white-space:nowrap;z-index:1;}
+  .day-head{padding:16px 16px 6px;font-size:var(--fs-caption);font-weight:600;color:var(--ink-2);}
+  .day-group{overflow:hidden;}
+  .row{display:flex;align-items:stretch;position:relative;min-height:56px;border-bottom:1px solid var(--line);}
+  .row:active{background:var(--line);}
+  .row-div{display:none;}
+  .row .body{flex:1;min-width:0;padding:10px 16px;display:flex;flex-direction:column;justify-content:center;}
+  .noproof-inline{color:var(--st-rejected);font-size:var(--fs-body);margin-left:5px;}
   .rline1{display:flex;justify-content:space-between;align-items:baseline;gap:12px;}
-  .rline1 .vendor{font-weight:600;font-size:15px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .rline1 .amt-main{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:15.5px;color:var(--ink);white-space:nowrap;flex:none;letter-spacing:-.02em;}
-  .amt-conv{color:var(--slate);font-weight:500;}
-  .amt-need{color:var(--amber);font-weight:500;}
+  .rline1 .vendor{font-weight:600;font-size:var(--fs-body);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .rline1 .amt-main{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:var(--fs-body);color:var(--ink);white-space:nowrap;flex:none;letter-spacing:-.02em;}
+  .amt-conv{color:var(--ink-2);font-weight:400;}
+  .amt-need{color:var(--st-submitted);font-weight:600;}
   .rline2{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-top:4px;}
-  .rline2 .meta{font-size:12.5px;color:var(--slate);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .rline2 .cur{font-size:10.5px;font-weight:600;letter-spacing:.04em;color:var(--slate);white-space:nowrap;flex:none;}
+  .rline2 .meta{font-size:var(--fs-caption);color:var(--ink-2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rline2 .cur{font-size:var(--fs-caption);font-weight:600;letter-spacing:.04em;color:var(--ink-2);white-space:nowrap;flex:none;}
   .row-status{display:flex;justify-content:flex-end;align-items:baseline;text-align:right;min-width:0;max-width:58%;flex:0 1 auto;white-space:nowrap;overflow:hidden;}
   .claim-id-part{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .claim-separator,.status-part{flex:none;}
-  .claim-id-inline{font-size:10px;font-weight:500;color:var(--slate);}
-  .claim-id-warning{color:var(--danger);}
-  .row .type-badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:4px;margin-right:6px;vertical-align:1px;}
-  .type-travel{background:#e5f3f1;color:var(--jade-deep);}
-  .type-expense{background:#eef0f2;color:var(--ink-soft);}
+  .claim-id-inline{font-size:var(--fs-caption);font-weight:400;color:var(--ink-2);}
+  .claim-id-warning{color:var(--st-rejected);}
+  .row .type-badge{display:inline-block;font-size:var(--fs-caption);font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:0px 5px;border-radius:var(--r-sm);margin-right:6px;vertical-align:1px;border:1px solid currentColor;background:transparent;}
+  .type-travel{color:var(--accent);}
+  .type-expense{color:var(--ink-3);}
   .co-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:0;}
-  .row-tags{font-size:11px;color:var(--slate);margin-top:3px;line-height:1.3;}
-  .st-word-unclaimed{color:var(--slate);}
-  .st-word-submitted{color:var(--amber);}
-  .st-word-reimbursed{color:var(--green);}
+  .row-tags{font-size:var(--fs-caption);color:var(--ink-2);margin-top:3px;line-height:1.3;}
+  .st-word-unclaimed{color:var(--st-unclaimed);}
+  .st-word-submitted{color:var(--st-submitted);}
+  .st-word-reimbursed{color:var(--st-reimbursed);}
   .swatches{display:flex;flex-wrap:wrap;gap:10px;}
-  .swatch{width:30px;height:30px;border-radius:50%;border:2px solid rgba(0,0,0,.12);}
+  .swatch{width:30px;height:30px;border-radius:50%;border:2px solid var(--line-strong);}
   .swatch.on{outline:2px solid var(--ink);outline-offset:2px;}
 
-  /* status accents */
-  .st-unclaimed{background:var(--slate);}
-  .st-submitted{background:var(--amber);}
-  .st-reimbursed{background:var(--green);}
-  .st-rejected{background:var(--danger);}
-
-  .empty{text-align:center;color:var(--slate);padding:60px 30px;}
+  .empty{text-align:center;color:var(--ink-2);padding:60px 30px;}
   .empty h3{color:var(--ink);font-weight:600;margin:0 0 6px;}
-  .empty p{margin:0;font-size:14px;}
+  .empty p{margin:0;font-size:var(--fs-meta);}
 
   /* ---------- Bottom nav + FAB ---------- */
   .tabbar{
     position:fixed;left:0;right:0;bottom:0;z-index:45;
-    background:var(--surface);border-top:1px solid var(--line);
+    background:var(--bg);border-top:1px solid var(--line);
     display:flex;padding:3px 6px calc(3px + var(--safe-b));
   }
   body.form-open .tabbar{display:none;}
-  .tabbar button{flex:1;padding:4px 4px;font-family:var(--sans);font-size:var(--text-nav);font-weight:var(--weight-medium);color:var(--slate);display:flex;flex-direction:column;align-items:center;gap:1px;border-radius:8px;line-height:1.1;}
-  .tabbar button.active{color:var(--jade);}
+  .tabbar button{flex:1;padding:4px 4px;font-family:var(--sans);font-size:var(--fs-caption);font-weight:600;color:var(--ink-3);display:flex;flex-direction:column;align-items:center;gap:1px;border-radius:8px;line-height:1.1;}
+  .tabbar button.active{color:var(--accent);}
   .tabbar button svg{width:18px;height:18px;}
   .fab{
     position:fixed;right:18px;bottom:calc(54px + var(--safe-b));z-index:31;
-    width:52px;height:52px;border-radius:16px;background:var(--jade);color:#fff;
-    box-shadow:0 8px 22px rgba(15,118,110,.4);
+    width:52px;height:52px;border-radius:var(--r-pill);background:var(--accent);color:var(--on-accent);
+    box-shadow:0 4px 16px rgba(0,0,0,.35);
     display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:300;
   }
   .fab:active{transform:scale(.94);}
 
   /* ---------- Screen (overlay) ---------- */
   .screen{
-    position:fixed;inset:0;z-index:40;background:var(--paper);
+    position:fixed;inset:0;z-index:40;background:var(--bg);
     transform:translateX(100%);transition:transform .22s ease;
     display:flex;flex-direction:column;
   }
   .screen.show{transform:translateX(0);}
   .screen-head{
-    position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--line);
+    position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);
     padding:calc(env(safe-area-inset-top,0px) + 12px) 14px 12px;
     display:flex;align-items:center;gap:10px;
   }
-  .screen-head .back{font-size:15px;font-weight:600;color:var(--jade);padding:4px 6px;display:flex;align-items:center;gap:3px;}
-  .screen-head h2{font-size:17px;font-weight:700;margin:0;flex:1;text-align:center;}
+  .screen-head .back{font-size:var(--fs-body);font-weight:600;color:var(--accent);padding:4px 6px;display:flex;align-items:center;gap:3px;}
+  .screen-head h2{font-size:var(--fs-title);font-weight:600;margin:0;flex:1;text-align:center;}
   .screen-head .right{min-width:64px;text-align:right;}
-  .screen-head .right button{color:var(--jade);font-weight:700;font-size:15px;padding:4px 6px;}
+  .screen-head .right button{color:var(--accent);font-weight:600;font-size:var(--fs-body);padding:4px 6px;}
   .screen-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:13px 14px calc(70px + var(--safe-b));}
 
   /* ---------- Form ---------- */
   .field{margin-bottom:12px;}
-  .field > label{display:block;font-size:13px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--ink-soft);margin-bottom:6px;}
-  .field .req{color:var(--danger);}
-  .field .opt{color:var(--slate);font-weight:500;text-transform:none;letter-spacing:0;font-size:11px;}
+  .field > label{display:block;font-size:var(--fs-meta);font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink-2);margin-bottom:6px;}
+  .field .req{color:var(--st-rejected);}
+  .field .opt{color:var(--ink-3);font-weight:400;text-transform:none;letter-spacing:0;font-size:var(--fs-caption);}
   input[type=text],input[type=number],input[type=date],textarea,select{
     width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);
     outline:none;transition:border-color .15s;
   }
-  input:focus,textarea:focus,select:focus{border-color:var(--jade);box-shadow:0 0 0 3px rgba(15,118,110,.12);}
+  input:focus,textarea:focus,select:focus{border-color:var(--accent);}
   textarea{resize:vertical;min-height:56px;}
   .lrow{display:flex;align-items:center;gap:12px;}
-  .lrow > label{width:33%;flex:none;font-size:13px;font-weight:500;color:var(--ink-soft);margin:0;}
+  .lrow > label{width:33%;flex:none;font-size:var(--fs-meta);font-weight:400;color:var(--ink-2);margin:0;}
   .lrow.tall{align-items:flex-start;}
   .lrow.tall > label{padding-top:9px;}
   .lrow > .lctl{flex:1;min-width:0;display:flex;justify-content:flex-end;}
@@ -178,60 +175,67 @@
   .lbreak{border-top:1px solid var(--line);}
   #backupBanner{display:none;}
   #updateBanner{display:none;}
-  .bkp-inner{display:flex;align-items:center;gap:10px;justify-content:space-between;background:#fbe7e2;border:1px solid #e9c3b6;color:#8a3b22;border-radius:11px;padding:9px 12px;margin:10px 14px 0;font-size:12.5px;line-height:1.35;}
-  .bkp-inner button{background:var(--jade);color:#fff;border-radius:8px;padding:7px 13px;font-size:12.5px;font-weight:600;white-space:nowrap;flex:none;}
+  .bkp-inner{display:flex;align-items:center;gap:10px;justify-content:space-between;background:transparent;border:1px solid var(--st-rejected);color:var(--st-rejected);border-radius:var(--r-md);padding:9px 12px;margin:10px 14px 0;font-size:var(--fs-caption);line-height:1.35;}
+  .bkp-inner button{background:transparent;color:var(--accent);border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:7px 13px;font-size:var(--fs-caption);font-weight:600;white-space:nowrap;flex:none;}
+  .bkp-inner.upd{border-color:var(--line-strong);color:var(--ink);}
+  .bkp-inner.upd button{background:var(--accent);color:var(--on-accent);}
   .date-wrap{position:relative;}
   .date-text{display:block;width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:16px;color:var(--ink);}
   .date-overlay{position:absolute;inset:0;width:100%;height:100%;opacity:0;}
   .amount-row{display:flex;gap:0;}
-  .amount-row input{flex:1;font-family:var(--mono);font-size:20px;font-weight:600;text-align:right;letter-spacing:-.02em;border-top-right-radius:0;border-bottom-right-radius:0;}
-  .amount-row select{width:62px;flex:none;font-weight:400;font-size:14px;color:var(--ink-soft);border-top-left-radius:0;border-bottom-left-radius:0;border-left:none;padding-left:6px;padding-right:4px;}
+  .amount-row input{flex:1;font-family:var(--mono);font-size:var(--fs-amount);font-weight:600;text-align:right;letter-spacing:-.02em;border-top-right-radius:0;border-bottom-right-radius:0;}
+  .amount-row select{width:62px;flex:none;font-weight:400;font-size:var(--fs-meta);color:var(--ink-2);border-top-left-radius:0;border-bottom-left-radius:0;border-left:none;padding-left:6px;padding-right:4px;}
 
   .seg{display:flex;gap:8px;}
-  .seg button{flex:1;padding:10px;border:1.5px solid var(--line);border-radius:11px;background:var(--surface);font-weight:600;font-size:15px;color:var(--ink-soft);display:flex;align-items:center;justify-content:center;gap:7px;}
+  .seg button{flex:1;padding:10px;border:1.5px solid var(--line-strong);border-radius:11px;background:transparent;font-weight:600;font-size:var(--fs-body);color:var(--ink-2);display:flex;align-items:center;justify-content:center;gap:7px;}
   .seg button .ic{font-size:20px;}
-  .seg button.on{border-color:var(--jade);background:#effaf8;color:var(--jade-deep);}
+  .seg button.on{border-color:var(--accent);background:transparent;color:var(--accent);}
 
   .picker-list{display:flex;flex-wrap:wrap;gap:8px;}
-  .pill{padding:9px 14px;border:1.5px solid var(--line);border-radius:999px;background:var(--surface);font-weight:600;font-size:14px;color:var(--ink-soft);}
-  .pill.on{border-color:var(--jade);background:#effaf8;color:var(--jade-deep);}
-  .pill.add{border-style:dashed;color:var(--slate);}
+  .pill{padding:9px 14px;border:1.5px solid var(--line-strong);border-radius:var(--r-pill);background:transparent;font-weight:600;font-size:var(--fs-meta);color:var(--ink-2);}
+  .pill.on{border-color:var(--accent);background:transparent;color:var(--accent);}
+  .pill.add{border-style:dashed;color:var(--ink-3);}
 
-  .tag{padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:13.5px;font-weight:500;color:var(--ink-soft);}
-  .tag.on{background:var(--ink);color:#fff;border-color:var(--ink);}
-  .tag.more,.tag.add{background:var(--soft);border-style:dashed;color:var(--slate);}
-  .tag-search{margin-bottom:8px;font-size:14px;}
+  .tag{padding:7px 12px;border:1px solid var(--line-strong);border-radius:var(--r-pill);background:transparent;font-size:var(--fs-meta);font-weight:400;color:var(--ink-2);}
+  .tag.on{background:transparent;color:var(--accent);border-color:var(--accent);}
+  .tag.more,.tag.add{background:transparent;border-style:dashed;color:var(--ink-3);}
+  .tag-search{margin-bottom:8px;}
 
   .loc-box{border:1px solid var(--line);border-radius:11px;padding:11px;background:var(--surface);}
-  .loc-coords{font-family:var(--mono);font-size:13px;color:var(--ink-soft);}
-  .btn{display:block;width:100%;text-align:center;padding:14px;border-radius:12px;font-weight:600;font-size:15px;}
-  .btn-primary{background:var(--jade);color:#fff;}
-  .btn-primary:active{background:var(--jade-deep);}
-  .btn-primary:disabled{background:#a9c4c0;}
-  .btn-positive{background:var(--green);color:#fff;border:1.5px solid var(--green);}
+  .loc-coords{font-family:var(--mono);font-size:var(--fs-meta);color:var(--ink-2);}
+  .btn{display:block;width:100%;text-align:center;padding:14px;border-radius:var(--r-md);font-weight:600;font-size:var(--fs-body);}
+  .btn-primary{background:var(--accent);color:var(--on-accent);}
+  .btn-primary:active{background:var(--accent-press);}
+  .btn-primary:disabled{background:var(--line-strong);color:var(--ink-3);}
+  .btn-positive{background:var(--st-reimbursed);color:var(--on-accent);border:1.5px solid var(--st-reimbursed);}
   .btn-positive:active{filter:brightness(.9);}
-  .btn-positive:disabled{background:#aeb9a7;color:#f5f5f2;border-color:#aeb9a7;cursor:default;}
-  .btn-ghost{background:var(--surface);color:var(--jade);border:1.5px solid var(--line);}
-  .btn-danger{background:#fdecec;color:var(--danger);border:1.5px solid #f3cccc;}
-  .btn-sm{padding:9px 13px;font-size:13.5px;border-radius:10px;}
+  .btn-positive:disabled{background:var(--line-strong);color:var(--ink-3);border-color:var(--line-strong);cursor:default;}
+  .btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line-strong);}
+  .btn-danger{background:var(--st-rejected);color:var(--on-accent);border:1.5px solid var(--st-rejected);}
+  .btn-destructive{display:block;width:100%;text-align:center;padding:14px;font-weight:600;font-size:var(--fs-body);color:var(--st-rejected);background:transparent;border:none;margin-top:var(--space-6);}
+  .btn-sm{padding:9px 13px;font-size:var(--fs-meta);border-radius:10px;}
   .btn-row{display:flex;gap:10px;margin-top:8px;}
   .btn-row .btn{flex:1;}
 
   .proofs{display:flex;flex-wrap:wrap;gap:10px;}
-  .proof-thumb{position:relative;width:78px;height:78px;border-radius:11px;overflow:hidden;border:1px solid var(--line);background:#f0f3f6;display:flex;align-items:center;justify-content:center;}
+  .proof-thumb{position:relative;width:78px;height:78px;border-radius:11px;overflow:hidden;border:1px solid var(--line);background:var(--line);display:flex;align-items:center;justify-content:center;}
   .proof-thumb img{width:100%;height:100%;object-fit:cover;}
-  .proof-thumb .pdf{font-size:11px;font-weight:700;color:var(--danger);}
-  .proof-thumb .del{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;width:20px;height:20px;border-radius:50%;font-size:13px;line-height:20px;text-align:center;}
-  .add-proof{width:78px;height:78px;border-radius:11px;border:1.5px dashed var(--line);background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--slate);font-size:11px;font-weight:600;}
+  .proof-thumb .pdf{font-size:var(--fs-caption);font-weight:600;color:var(--st-rejected);}
+  /* Delete badge sits over arbitrary photo/PDF thumbnails, so it stays a fixed dark scrim
+     with a white glyph in both themes — a theme-tinted badge would be unreadable against
+     unpredictable receipt photos. Narrow, deliberate exception (see changelog). */
+  .proof-thumb .del{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;width:20px;height:20px;border-radius:50%;font-size:var(--fs-meta);line-height:20px;text-align:center;}
+  .add-proof{width:78px;height:78px;border-radius:11px;border:1.5px dashed var(--line-strong);background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--ink-3);font-size:var(--fs-caption);font-weight:600;}
   .add-proof .plus{font-size:22px;font-weight:300;line-height:1;}
 
-  /* image cropper */
-  .cropper-ov{position:fixed;inset:0;background:rgba(24,22,20,.94);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;}
-  .cropper-title{color:#f2f0e9;font-size:13px;opacity:.85;text-align:center;}
+  /* image cropper — a fixed dark modal over photo content; intentionally theme-invariant
+     for the same reason as the delete badge above (see changelog). */
+  .cropper-ov{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;}
+  .cropper-title{color:rgba(255,255,255,.85);font-size:var(--fs-meta);opacity:.85;text-align:center;}
   .cropper-stage{position:relative;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;line-height:0;}
   .cropper-stage img{display:block;-webkit-user-drag:none;}
   .crop-box{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.5);box-sizing:border-box;cursor:move;}
-  .crop-h{position:absolute;width:22px;height:22px;background:var(--jade);border:2px solid #fff;border-radius:50%;box-sizing:border-box;}
+  .crop-h{position:absolute;width:22px;height:22px;background:var(--accent);border:2px solid #fff;border-radius:50%;box-sizing:border-box;}
   .crop-h.tl{left:-12px;top:-12px;} .crop-h.tr{right:-12px;top:-12px;}
   .crop-h.bl{left:-12px;bottom:-12px;} .crop-h.br{right:-12px;bottom:-12px;}
   .cropper-bar{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;}
@@ -270,129 +274,125 @@
 
   /* summary card */
   .summary{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:16px;}
-  .summary .srow{display:flex;justify-content:space-between;gap:12px;padding:13px 15px;border-bottom:1px solid var(--line-soft);font-size:14.5px;}
+  .summary .srow{display:flex;justify-content:space-between;gap:12px;padding:13px 15px;border-bottom:1px solid var(--line);font-size:var(--fs-body);}
   .summary .srow:last-child{border-bottom:none;}
-  .summary .srow .k{color:var(--slate);font-weight:500;}
+  .summary .srow .k{color:var(--ink-2);font-weight:400;}
   .summary .srow .v{font-weight:600;text-align:right;}
-  .summary .srow .v.big{font-family:var(--mono);font-size:18px;}
+  .summary .srow .v.big{font-family:var(--mono);font-size:var(--fs-title);}
 
   /* detail */
   .det-amt{text-align:center;padding:22px 0 8px;}
-  .det-amt .n{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:40px;font-weight:600;letter-spacing:-.02em;}
-  .det-amt .cur{font-size:14px;color:var(--slate);font-weight:600;}
+  .det-amt .n{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:var(--fs-amount);font-weight:600;letter-spacing:-.02em;}
+  .det-amt .cur{font-size:var(--fs-meta);color:var(--ink-2);font-weight:600;}
   .status-line{display:flex;justify-content:center;gap:8px;margin:6px 0 20px;}
-  .status-tag{padding:6px 14px;border-radius:999px;font-size:13px;font-weight:700;}
-  .status-tag.st-unclaimed-c{background:#eef1f4;color:var(--slate);}
-  .status-tag.st-submitted-c{background:#fdf0e0;color:var(--amber);}
-  .status-tag.st-reimbursed-c{background:#e6f4ea;color:var(--green);}
+  .status-tag{padding:6px 14px;border-radius:var(--r-pill);font-size:var(--fs-meta);font-weight:600;background:transparent;border:1px solid currentColor;}
   /* shared status colours (used by status-tag and mini-tag) */
-  .st-unclaimed-c{background:#eef1f4;color:var(--slate);}
-  .st-submitted-c{background:#fdf0e0;color:var(--amber);}
-  .st-reimbursed-c{background:#e6f4ea;color:var(--green);}
-  .st-rejected-c{background:#fbe9e6;color:var(--danger);}
+  .st-unclaimed-c{color:var(--st-unclaimed);}
+  .st-submitted-c{color:var(--st-submitted);}
+  .st-reimbursed-c{color:var(--st-reimbursed);}
+  .st-rejected-c{color:var(--st-rejected);}
 
   .kv{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-bottom:16px;overflow:hidden;}
-  .kv .r{display:flex;justify-content:space-between;gap:12px;padding:13px 15px;border-bottom:1px solid var(--line-soft);font-size:14.5px;}
+  .kv .r{display:flex;justify-content:space-between;gap:12px;padding:13px 15px;border-bottom:1px solid var(--line);font-size:var(--fs-body);}
   .kv .r:last-child{border-bottom:none;}
-  .kv .r .k{color:var(--slate);}
+  .kv .r .k{color:var(--ink-2);}
   .kv .r .v{font-weight:600;text-align:right;max-width:62%;}
-  .edit-log{font-size:12.5px;color:var(--slate);}
-  .edit-log .e{padding:7px 0;border-bottom:1px solid var(--line-soft);}
+  .edit-log{font-size:var(--fs-caption);color:var(--ink-2);}
+  .edit-log .e{padding:7px 0;border-bottom:1px solid var(--line);}
   .edit-log .e:last-child{border:none;}
 
-  .section-label{font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink-soft);margin:16px 4px 8px;}
+  .section-label{font-size:var(--fs-meta);font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink-2);margin:16px 4px 8px;}
 
   /* claim */
-  .claim-row{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:12px 14px;margin-bottom:8px;}
-  .claim-row .cbox{width:24px;height:24px;border-radius:7px;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;}
-  .claim-row.sel .cbox{background:var(--jade);border-color:var(--jade);}
+  .claim-row{display:flex;align-items:center;gap:12px;background:transparent;border:none;border-bottom:1px solid var(--line);border-radius:0;padding:12px 4px;margin-bottom:0;}
+  .claim-row .cbox{width:24px;height:24px;border-radius:7px;border:2px solid var(--line-strong);flex:none;display:flex;align-items:center;justify-content:center;color:var(--on-accent);font-size:var(--fs-body);}
+  .claim-row.sel .cbox{background:var(--accent);border-color:var(--accent);}
   .claim-row .info{flex:1;min-width:0;}
   .claim-row .info .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .claim-row .info .s{font-size:12.5px;color:var(--slate);margin-top:2px;}
+  .claim-row .info .s{font-size:var(--fs-caption);color:var(--ink-2);margin-top:2px;}
   .claim-row .a{font-family:var(--mono);font-weight:600;text-align:right;}
-  .totbar{position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:14px;margin:0 -14px;}
+  .totbar{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:14px;margin:0 -14px;}
   .tot-figs{display:flex;flex-wrap:wrap;gap:4px 18px;margin-bottom:10px;}
-  .tot-figs .tf{font-family:var(--mono);font-weight:600;font-size:18px;}
-  .warn{background:#fdf0e0;color:var(--amber);border-radius:10px;padding:10px 12px;font-size:13px;font-weight:600;margin-bottom:10px;}
+  .tot-figs .tf{font-family:var(--mono);font-weight:600;font-size:var(--fs-title);}
+  .warn{background:transparent;border:1px solid currentColor;border-radius:10px;padding:10px 12px;font-size:var(--fs-meta);font-weight:600;margin-bottom:10px;}
 
-  .batch-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:10px;}
+  .batch-card{background:transparent;border:none;border-top:1px solid var(--line);border-bottom:1px solid var(--line);border-radius:0;padding:12px 4px;margin-bottom:0;margin-top:-1px;}
   .batch-card .bh{display:flex;justify-content:space-between;align-items:baseline;}
-  .batch-card .bh .bt{font-weight:700;}
-  .batch-card .bh .bd{font-size:12.5px;color:var(--slate);}
+  .batch-card .bh .bt{font-weight:600;}
+  .batch-card .bh .bd{font-size:var(--fs-caption);color:var(--ink-2);}
   .batch-card .bstat{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;}
-  .batch-card.cancelled{background:#ebeae6;border-color:#d8d5cd;color:var(--ink-soft);}
-  .batch-section-title{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);margin:8px 2px 10px;}
-  .mini-tag{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;}
-  .row-tags{font-size:11px;color:var(--slate);margin-top:2px;line-height:1.3;}
+  .batch-card.cancelled{background:transparent;border-color:var(--line);color:var(--ink-3);}
+  .batch-section-title{font-size:var(--fs-caption);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:8px 2px 10px;}
+  .mini-tag{font-size:var(--fs-caption);font-weight:600;padding:3px 9px;border-radius:var(--r-pill);background:transparent;border:1px solid currentColor;}
+  .row-tags{font-size:var(--fs-caption);color:var(--ink-2);margin-top:2px;line-height:1.3;}
   .tp-list{display:flex;flex-direction:column;gap:0;max-height:44vh;overflow-y:auto;border:1px solid var(--line);border-radius:12px;margin-top:8px;}
-  .tp-item{display:flex;width:100%;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line-soft);font-size:15px;text-align:left;color:var(--ink);}
+  .tp-item{display:flex;width:100%;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);font-size:var(--fs-body);text-align:left;color:var(--ink);}
   .tp-item:last-child{border-bottom:none;}
-  .tp-item.on{color:var(--jade);font-weight:600;}
-  .tp-check{color:var(--jade);font-weight:800;}
+  .tp-item.on{color:var(--accent);font-weight:600;}
+  .tp-check{color:var(--accent);font-weight:600;}
   .tp-sort{display:flex;gap:6px;}
-  .tp-sort button{flex:1;padding:7px 6px;border:1px solid var(--line);border-radius:9px;font-size:12.5px;font-weight:500;color:var(--ink-soft);background:var(--surface);}
-  .tp-sort button.on{border-color:var(--jade);background:#effaf8;color:var(--jade-deep);}
-  .tag-empty{font-size:12.5px;color:var(--slate);}
+  .tp-sort button{flex:1;padding:7px 6px;border:1px solid var(--line-strong);border-radius:9px;font-size:var(--fs-caption);font-weight:400;color:var(--ink-2);background:transparent;}
+  .tp-sort button.on{border-color:var(--accent);background:transparent;color:var(--accent);}
+  .tag-empty{font-size:var(--fs-caption);color:var(--ink-2);}
 
-  .toast{position:fixed;left:50%;bottom:calc(72px + var(--safe-b));transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:600;z-index:100;opacity:0;transition:opacity .2s, transform .2s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.25);}
+  .toast{position:fixed;left:50%;bottom:calc(72px + var(--safe-b));transform:translateX(-50%);background:var(--surface);color:var(--ink);padding:12px 20px;border-radius:12px;font-size:var(--fs-meta);font-weight:600;z-index:100;opacity:0;transition:opacity .2s, transform .2s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.25);border:1px solid var(--line-strong);}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
 
-  .modal-back{position:fixed;inset:0;background:rgba(15,20,25,.5);z-index:60;display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:opacity .2s;}
+  .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:60;display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:opacity .2s;}
   .modal-back.show{opacity:1;pointer-events:auto;}
   .sheet{background:var(--surface);width:100%;border-radius:20px 20px 0 0;padding:20px 18px calc(24px + var(--safe-b));transform:translateY(100%);transition:transform .24s ease;}
   .modal-back.show .sheet{transform:translateY(0);}
-  .sheet h3{margin:0 0 16px;font-size:17px;}
-  .list-choice{border:1px solid var(--line);border-radius:12px;overflow:hidden;}
-  .list-choice button{display:flex;width:100%;justify-content:space-between;align-items:center;padding:14px 15px;border-bottom:1px solid var(--line-soft);font-size:15px;font-weight:600;text-align:left;}
+  .sheet h3{margin:0 0 16px;font-size:var(--fs-title);}
+  .list-choice{border:none;border-radius:0;overflow:hidden;}
+  .list-choice button{display:flex;width:100%;justify-content:space-between;align-items:center;padding:14px 15px;border-bottom:1px solid var(--line);font-size:var(--fs-body);font-weight:600;text-align:left;}
   .list-choice button:last-child{border-bottom:none;}
-  .list-choice button:active{background:#f6f8fa;}
-  .list-choice .check{color:var(--jade);font-weight:800;}
-  .list-choice button.lc-current{color:var(--slate);background:var(--soft);cursor:default;font-weight:500;}
-  .lc-cur-tag{font-size:11px;font-weight:600;color:var(--slate);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
+  .list-choice button:active{background:var(--line);}
+  .list-choice .check{color:var(--accent);font-weight:600;}
+  .list-choice button.lc-current{color:var(--ink-3);background:transparent;cursor:default;font-weight:400;}
+  .lc-cur-tag{font-size:var(--fs-caption);font-weight:600;color:var(--ink-2);background:transparent;border:1px solid var(--line-strong);border-radius:var(--r-pill);padding:2px 9px;}
 
-  .hint{font-size:12.5px;color:var(--slate);margin-top:7px;line-height:1.45;}
+  .hint{font-size:var(--fs-caption);color:var(--ink-2);margin-top:7px;line-height:1.45;}
   /* ---------- Compact entry form (one screen, 2-up rows) ---------- */
   .cform{display:flex;flex-direction:column;gap:11px;}
   .type-switch-row{display:flex;justify-content:flex-end;align-items:center;margin-bottom:2px;}
-  .switch{display:inline-flex;background:var(--soft);border-radius:999px;padding:3px;gap:2px;border:1px solid var(--line);}
-  .switch button{padding:7px 15px;border-radius:999px;font-size:13px;font-weight:600;color:var(--ink-soft);background:none;transition:background .15s,color .15s;}
-  .switch button.on{background:var(--surface);color:var(--jade);box-shadow:0 1px 3px rgba(0,0,0,.12);}
+  .switch{display:inline-flex;background:transparent;border-radius:var(--r-pill);padding:3px;gap:2px;border:1px solid var(--line-strong);}
+  .switch button{padding:7px 15px;border-radius:var(--r-pill);font-size:var(--fs-meta);font-weight:600;color:var(--ink-2);background:none;transition:background .15s,color .15s;}
+  .switch button.on{background:transparent;color:var(--accent);box-shadow:none;outline:1px solid var(--accent);outline-offset:-1px;}
   .frow{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end;}
   .field.nomb{margin-bottom:0;}
   .pill.wfull{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;}
   .loc-inline{display:flex;gap:8px;align-items:center;}
-  .cform .amount-row input{font-size:16px;}
   .topbar-row{display:flex;justify-content:space-between;align-items:center;}
-  .topbtn{font-size:13px;font-weight:600;color:var(--jade);background:none;padding:4px 6px;}
-  .searchbar{background:var(--surface);padding:8px 12px;border-bottom:1px solid var(--line);}
-  .searchbar input{width:100%;padding:10px 13px;border:1px solid var(--line);border-radius:10px;background:var(--paper);font-size:16px;}
+  .topbtn{font-size:var(--fs-meta);font-weight:600;color:var(--accent);background:none;padding:4px 6px;}
+  .searchbar{background:var(--bg);padding:8px 12px;border-bottom:1px solid var(--line);}
+  .searchbar input{width:100%;padding:10px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface);}
   .sum-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 15px;margin-bottom:12px;}
-  .sum-card h4{margin:0 0 8px;font-size:14px;font-weight:600;}
-  .sum-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:14px;}
+  .sum-card h4{margin:0 0 8px;font-size:var(--fs-meta);font-weight:600;}
+  .sum-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:var(--fs-meta);}
   .sum-row:last-child{border-bottom:none;}
   .sum-row .v{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;}
-  .sum-big .v{font-size:16px;}
-  .batches-screen .screen-head h2{font-size:17px;font-weight:var(--weight-bold);}
-  .batch-filter,.batch-filter.active{width:auto;margin:0 0 12px;padding:7px 12px;font-size:13px;font-weight:var(--weight-medium);background:var(--surface);color:var(--ink-soft);border-color:var(--line);}
+  .sum-big .v{font-size:var(--fs-body);}
+  .batches-screen .screen-head h2{font-size:var(--fs-title);font-weight:600;}
+  .batch-filter,.batch-filter.active{width:auto;margin:0 0 12px;padding:7px 12px;font-size:var(--fs-meta);font-weight:400;background:transparent;color:var(--ink-2);border-color:var(--line-strong);}
   .batch-card-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(92px,auto);column-gap:10px;row-gap:5px;align-items:baseline;}
   .batch-card-grid .left{min-width:0;white-space:nowrap;}
   .batch-card-grid .right{text-align:right;min-width:0;justify-self:end;}
-  .batch-card-grid .claim-line{display:flex;min-width:0;gap:.28em;font-size:15px;font-weight:var(--weight-semibold);}
+  .batch-card-grid .claim-line{display:flex;min-width:0;gap:.28em;font-size:var(--fs-body);font-weight:600;}
   .batch-card-grid .claim-date{flex:none;}
   .batch-card-grid .claim-id{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .batch-card-grid .claim-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .batch-card-grid .batch-ident-line{display:flex;min-width:0;gap:.28em;white-space:nowrap;}
   .batch-card-grid .batch-ident-line .claim-id{flex:0 1 auto;}
   .batch-card-grid .batch-company-items{flex:none;}
-  .batch-card-grid .total{max-width:46vw;overflow-wrap:anywhere;line-height:1.2;font-family:var(--mono);font-size:15px;font-weight:var(--weight-bold);}
-  .batch-card-grid>:nth-child(3){min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;font-weight:var(--weight-medium);}
-  .batch-card-grid>:nth-child(4){font-size:12.5px;font-weight:var(--weight-semibold);white-space:nowrap;background:transparent;padding:0;border-radius:0;}
-  .batch-card-grid>:nth-child(5),.batch-card-grid .outcomes{font-size:11.5px;font-weight:var(--weight-regular);color:var(--slate);}
-  .batch-card-grid>:nth-child(5){min-width:0;overflow:hidden;text-overflow:ellipsis;}
+  .batch-card-grid .total{max-width:46vw;overflow-wrap:anywhere;line-height:1.2;font-family:var(--mono);font-size:var(--fs-body);font-weight:600;}
+  .batch-card-grid .grid-ident{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-caption);font-weight:400;}
+  .batch-card-grid .grid-status{font-size:var(--fs-caption);font-weight:600;white-space:nowrap;background:transparent;padding:0;border-radius:0;}
+  .batch-card-grid .grid-range,.batch-card-grid .outcomes{font-size:var(--fs-caption);font-weight:400;color:var(--ink-2);}
+  .batch-card-grid .grid-range{min-width:0;overflow:hidden;text-overflow:ellipsis;}
   .batch-card-grid .outcomes{max-width:46vw;line-height:1.25;overflow-wrap:anywhere;}
-  .batch-card.cancelled .batch-card-grid{color:var(--slate);}
+  .batch-card.cancelled .batch-card-grid{color:var(--ink-3);}
   .travel-calc{font-family:var(--mono);font-variant-numeric:tabular-nums;}
-  .rate-action{font-size:12px;color:var(--jade);margin-top:5px;}
+  .rate-action{font-size:var(--fs-caption);color:var(--accent);margin-top:5px;}
   .dest-card{margin-bottom:10px;}
   .dest-actions{display:flex;gap:8px;margin-top:8px;}
   .psection-title{font-size:16px;font-weight:700;margin:18px 0 8px;}
@@ -404,9 +404,62 @@
   .ptravel tr{break-inside:avoid;page-break-inside:avoid;}
   .travel-proof{break-inside:avoid;page-break-inside:avoid;margin:10px 0 16px;}
   .travel-proof h4{margin:0 0 7px;font-size:11px;}
+
+/* WO9 Stage 2 — A1: THB claim value is the strong number */
+.amt-native{color:var(--ink-2);font-weight:400;}
+.amt-conv{color:var(--ink);font-weight:600;}
+
+/* WO9 Stage 2 — A3: filter chips stay visible below the top bar */
+.topbar{position:static;}
+.searchbar{position:static;}
+.filters{top:0;z-index:30;}
+
+/* WO9 Stage 2 — A4: bottom sheets can scroll */
+.sheet{max-height:82vh;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+
+/* WO9 Stage 2 — A5: receipt delete target */
+.proof-thumb .del{width:28px;height:28px;line-height:28px;font-size:17px;top:3px;right:3px;}
+.proof-thumb .del::after{content:"";position:absolute;top:-8px;right:-8px;bottom:-8px;left:-8px;}
+
+/* WO9 Stage 2 — A7: currency dropdown at 16px (Stage 1 removed user-scalable=no; iOS zooms
+   on focus of any control under 16px — this is the one sub-16px control in the Carbon sheet) */
+.amount-row select{font-size:16px;}
+
+/* WO9 Stage 2 — C: touch targets to 44px */
+.chip{padding:12px 14px;}
+.tag{padding:12px 14px;}
+.screen-head .back{padding:11px 10px;margin:-11px -10px;}
+.screen-head .right button{padding:11px 10px;margin:-11px -10px;}
+.topbtn{padding:11px 10px;margin:-11px -10px;}
+.tabbar button{padding:9px 4px;}
+.rate-action{display:inline-block;padding:12px 0;}
+.list-choice .check{padding:11px;margin:-11px;}
+
+/* WO9 Stage 2 — D: the app acknowledges a tap */
+button:active,.chip:active,.tag:active,.pill:active{opacity:.55;}
+.row:active{opacity:1;background:var(--line);}
+
+/* WO9 Stage 2 — E: errors land on the field, not only in a toast */
+.lrow.has-error > label{color:var(--st-rejected);}
+.input-error,.pill-error{border-color:var(--st-rejected) !important;}
+.field-msg{font-size:var(--fs-caption);color:var(--st-rejected);margin:-6px 0 2px;text-align:right;line-height:1.35;}
 </style>
 </head>
 <body>
+<script>
+/* Applies the saved theme before anything paints, so there's no flash of the wrong mode.
+   Reads localStorage only (IndexedDB isn't open yet at this point in boot). */
+(function(){
+  try{
+    var saved = localStorage.getItem("claims_theme");
+    var wantsDark = saved==="dark" || ((saved==="system"||!saved) && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    if(wantsDark){
+      document.documentElement.setAttribute("data-theme","dark");
+      var tc=document.getElementById("themeColorMeta"); if(tc) tc.setAttribute("content","#000000");
+    }
+  }catch(e){ /* localStorage unavailable — fall back to light */ }
+})();
+</script>
 
 <!-- ===== HOME ===== -->
 <div class="topbar">
@@ -433,11 +486,11 @@
   </button>
   <button data-tab="claim">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4M7 3h10a2 2 0 012 2v14l-7-3-7 3V5a2 2 0 012-2z"/></svg>
-    Submit Claim
+    New claim
   </button>
   <button data-tab="batches">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
-    Claim Batches
+    Claims
   </button>
   <button data-tab="settings">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
@@ -462,14 +515,14 @@
 /* ---------- constants ---------- */
 // Bump this AND the matching APP_VERSION constant in sw.js together on every deploy —
 // it's how the update banner (below) knows a new version is ready.
-const APP_VERSION = "2026.07.18b";
+const APP_VERSION = "2026.07.25";
 const CURRENCIES = ["THB","RMB","USD"];
 const CUR_SYM = {THB:"฿", RMB:"¥", USD:"$"};
 const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"Reimbursed"};
 // Company dot colours — deliberately NOT the status colours (grey/amber/green/red), so a
 // company dot is never mistaken for a status. Blue / purple / teal / pink family.
-const COMPANY_PALETTE = ["#3f74c9","#7a5bd0","#1f9d8f","#cf5f93","#2b9fd6","#9a55b8","#556fb5","#c65f7a"];
-function companyColor(id){const c=state.companies.find(x=>x.id===id);return (c&&c.color)||"#b4b2a9";}
+const COMPANY_PALETTE = ["#8C7BE8","#2FA3C4","#D45FA8","#B08A1E"];
+function companyColor(id){const c=state.companies.find(x=>x.id===id);return (c&&c.color)||"var(--ink-3)";}
 // THB claim value of an entry. THB entries use their own amount; foreign entries use the
 // manually-entered claim_thb_minor (null until filled from the card statement).
 function claimThb(e){ return e.currency==="THB" ? e.amount_minor : (e.claim_thb_minor!=null ? e.claim_thb_minor : null); }
@@ -702,7 +755,7 @@ function renderUpdateBanner(){
   // the backup banner isn't currently showing.
   if(!updateWaiting || updateBannerDismissed || backupIsDue()){ el.style.display="none"; el.innerHTML=""; return; }
   el.style.display="block";
-  el.innerHTML=`<div class="bkp-inner"><span>Update ready</span><span style="display:flex;gap:8px;align-items:center;"><button id="updateNow">Update</button><button id="updateDismiss" style="background:transparent;color:#8a3b22;font-weight:700;padding:4px 8px;">×</button></span></div>`;
+  el.innerHTML=`<div class="bkp-inner upd"><span>Update ready</span><span style="display:flex;gap:8px;align-items:center;"><button id="updateNow">Update</button><button id="updateDismiss" style="font-weight:700;padding:4px 8px;">×</button></span></div>`;
   $("#updateNow").addEventListener("click",applyUpdate);
   $("#updateDismiss").addEventListener("click",()=>{ updateBannerDismissed=true; renderUpdateBanner(); });
 }
@@ -763,26 +816,26 @@ function amountMainHTML(e){
   if(e.type==='travel' && e.amount_minor===0) return '—';
   const native = money(e.amount_minor, e.currency);
   if(e.currency==="THB") return native;
-  if(e.claim_thb_minor!=null) return `${native} <span class="amt-conv">→ ${money(e.claim_thb_minor,"THB")}</span>`;
-  return `${native} <span class="amt-need">→ ⚠ ฿???</span>`;
+  const nat = `<span class="amt-native">${native}</span>`;
+  if(e.claim_thb_minor!=null) return `${nat} <span class="amt-conv">→ ${money(e.claim_thb_minor,"THB")}</span>`;
+  return `${nat} <span class="amt-need">→ set ฿</span>`;
 }
 function logRowHTML(e, noProof){
   const showNoProof = noProof && !(e.type==='travel' && e.amount_minor===0);
+  const noProofBadge = showNoProof?`<span class="noproof-inline" title="No payment proof attached" aria-label="No payment proof attached">⚠</span>`:"";
   const tags = (e.tags&&e.tags.length)
     ? `<div class="row-tags">${[...e.tags].sort((a,b)=>a.localeCompare(b)).slice(0,4).map(esc).join(", ")}${e.tags.length>4?`, +${e.tags.length-4}`:""}</div>` : "";
   const claimNo=state.activeClaimIds.get(e.id),claimWarning=state.activeClaimIntegrity.has(e.id);
   const claimMeta=claimWarning?`<span class="claim-id-part claim-id-inline claim-id-warning" title="Multiple active claim memberships detected" aria-label="Warning: multiple active claim memberships">⚠ claim conflict</span><span class="claim-separator"> · </span>`:claimNo?`<span class="claim-id-part claim-id-inline mono" title="Active claim ${esc(claimNo)}" aria-label="Active claim ${esc(claimNo)}">${esc(claimNo)}</span><span class="claim-separator"> · </span>`:"";
   return `<div class="row" data-id="${esc(e.id)}">
-      <div class="accent st-${e.status}"></div>
-      ${showNoProof?`<span class="noproof-top">⚠ no proof</span>`:""}
       <div class="body">
         <div class="rline1">
-          <div class="vendor">${esc(entryDisplayName(e))}</div>
+          <div class="vendor">${esc(entryDisplayName(e))}${noProofBadge}</div>
           <div class="amt-main">${amountMainHTML(e)}</div>
         </div>
         <div class="rline2">
           <div class="meta"><span class="type-badge type-${e.type}">${e.type}</span><span class="co-dot" style="background:${companyColor(e.company_id)}"></span>${esc(companyName(e.company_id))}</div>
-          <div class="cur row-status">${claimMeta}<span class="status-part st-word-${e.status}">${STATUS_LABEL[e.status]}</span></div>
+          <div class="cur row-status">${claimMeta}<span class="status-part st-word-${e.status}">● ${STATUS_LABEL[e.status]}</span></div>
         </div>
         ${tags}
       </div>
@@ -943,7 +996,7 @@ async function saveEntry(isEdit){
 
 function askEditReason(){
   return new Promise(res=>{
-    openSheet(`<h3>What changed? <span style="font-weight:400;color:var(--slate);font-size:14px;">(optional)</span></h3>
+    openSheet(`<h3>What changed? <span style="font-weight:400;color:var(--ink-2);font-size:var(--fs-meta);">(optional)</span></h3>
       <div class="field"><input type="text" id="reasonInput" placeholder="e.g. corrected amount from receipt"></div>
       <button class="btn btn-primary" id="reasonSave">Save</button>
       <button class="btn btn-ghost" id="reasonSkip" style="margin-top:10px;">Skip</button>`);
@@ -1056,7 +1109,7 @@ function renderEntryFormCompact(allTags, isEdit){
     </div>
 
     <button class="btn btn-primary" id="cSave" style="margin-top:6px;">${isEdit?"Save changes":"Save entry"}</button>
-    ${isEdit && d.status==="unclaimed"?`<button class="btn btn-danger" id="cDelete" style="margin-top:8px;">Delete entry</button>`:""}
+    ${isEdit && d.status==="unclaimed"?`<button class="btn-destructive" id="cDelete">Delete entry</button>`:""}
   </div>`;
   const screen=openScreen(isEdit?"Edit entry":"New entry", body);
   screen.classList.add("is-form");
@@ -1164,7 +1217,35 @@ function wireCompactForm(screen,isEdit){
   if(cClaim){ cClaim.addEventListener("focus",()=>{ cClaim.value=cClaim.value.replace(/,/g,""); }); cClaim.addEventListener("blur",fmtClaim); fmtClaim(); }
   const cDateEl=q("#cDate");
   cDateEl.addEventListener("change",()=>{ d.payment_date=cDateEl.value; q("#cDateText").textContent=fmtDateText(cDateEl.value); });
+  // WO9 Stage 2 — E: field-level validation for this form's save button only (scope
+  // deliberately narrow — claim generation, restore, and other validation paths are untouched).
+  // The toast stays as the summary; this adds a pointer to which field needs fixing.
+  function clearFieldError(el){
+    const lrow=el.closest(".lrow"); if(!lrow) return;
+    lrow.classList.remove("has-error");
+    el.classList.remove("input-error","pill-error");
+    const next=lrow.nextElementSibling;
+    if(next && next.classList.contains("field-msg")) next.remove();
+  }
+  function clearAllFieldErrors(){
+    $$(".lrow.has-error",screen).forEach(r=>r.classList.remove("has-error"));
+    $$(".input-error,.pill-error",screen).forEach(el=>el.classList.remove("input-error","pill-error"));
+    $$(".field-msg",screen).forEach(el=>el.remove());
+  }
+  function showFieldError(el,message){
+    const lrow=el.closest(".lrow"); if(!lrow) return;
+    lrow.classList.add("has-error");
+    el.classList.add("input-error");
+    const msg=document.createElement("div");
+    msg.className="field-msg";
+    msg.textContent=message;
+    lrow.insertAdjacentElement("afterend",msg);
+    const clear=()=>clearFieldError(el);
+    el.addEventListener("input",clear,{once:true});
+    el.addEventListener("change",clear,{once:true});
+  }
   q("#cSave").addEventListener("click",async()=>{
+    clearAllFieldErrors();
     d.amount_str=q("#cAmount").value.trim();
     d.currency=q("#cCur").value;
     d.claim_thb_str=q("#cClaimThb")?q("#cClaimThb").value.trim():"";
@@ -1174,19 +1255,19 @@ function wireCompactForm(screen,isEdit){
     d.location_label=q("#cLocLabel")?q("#cLocLabel").value.trim():"";
     const isTravel=d.type==="travel";
     const amt=parseFloat(d.amount_str.replace(/,/g,""));
-    if(!d.company_id){toast("Choose a company");return;}
+    if(!d.company_id){toast("Choose a company");showFieldError(q("#cCompany"),"Choose a company");return;}
     if(isTravel){
       readTravelCalc();
-      if(!d.travel_destination){toast("Enter a destination");return;}
-      if(d.travel_distance_km==null||d.travel_distance_km<0){toast("Enter total distance");return;}
-      if(!Number.isSafeInteger(d.travel_fuel_rate_minor)||d.travel_fuel_rate_minor<0){toast("Enter a valid fuel rate");return;}
+      if(!d.travel_destination){toast("Enter a destination");showFieldError(q("#cTravelName"),"Enter a destination");return;}
+      if(d.travel_distance_km==null||d.travel_distance_km<0){toast("Enter total distance");showFieldError(q("#cDistance"),"Enter total distance");return;}
+      if(!Number.isSafeInteger(d.travel_fuel_rate_minor)||d.travel_fuel_rate_minor<0){toast("Enter a valid fuel rate");showFieldError(q("#cFuelRate"),"Enter a valid fuel rate");return;}
       d.vendor="";d.notes="";d.tags=[];
     }else{
-      if(!amt||amt<=0){toast("Enter an amount");return;}
+      if(!amt||amt<=0){toast("Enter an amount");showFieldError(q("#cAmount"),"Enter an amount");return;}
       d.amount_minor=Math.round(amt*100);
       d.location_lat=null;d.location_lng=null;d.location_label="";
     }
-    if(!d.payment_date){toast("Choose a date");return;}
+    if(!d.payment_date){toast("Choose a date");showFieldError(q("#cDateText"),"Choose a date");return;}
     await saveEntry(isEdit);
     closeScreen(screen);
     toast(isEdit?"Entry updated":"Entry saved");
@@ -1251,7 +1332,7 @@ async function openDetail(id){
     <button class="btn btn-ghost" id="goClaimBtn" style="margin-top:10px;">View claim</button>`:""}
     ${membershipConflict?`<div class="warn" style="margin-top:16px;">⚠ This entry has multiple active claim memberships. No claim link is shown until the integrity issue is resolved.</div>`:""}
 
-    ${e.status==="unclaimed"?`<button class="btn btn-danger" id="delBtn" style="margin-top:10px;">Delete entry</button>`:""}
+    ${e.status==="unclaimed"?`<button class="btn-destructive" id="delBtn">Delete entry</button>`:""}
 
     ${edits.length?`<div class="section-label">Edit history</div>
       <div class="kv" style="padding:4px 15px;"><div class="edit-log">
@@ -1336,7 +1417,7 @@ async function renderClaim(){
 
   const body=`
     <div class="field"><label>Company</label>
-      <button id="claimCompany" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:var(--surface);color:var(--ink);font-size:16px;display:flex;justify-content:space-between;align-items:center;">${esc(companyName(claimState.company))} <span style="color:var(--slate);">▾</span></button></div>
+      <button id="claimCompany" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:var(--surface);color:var(--ink);font-size:var(--fs-body);display:flex;justify-content:space-between;align-items:center;">${esc(companyName(claimState.company))} <span style="color:var(--ink-2);">▾</span></button></div>
     <div class="field"><label>Claim name <span class="opt">(optional)</span></label><input type="text" id="claimName" maxlength="100" placeholder="e.g. July client travel" value="${esc(claimState.claimName)}"></div>
     <div style="display:flex;gap:10px;">
       <div class="field" style="flex:1;"><label>From</label><input type="date" id="claimFrom" value="${claimState.from}"></div>
@@ -1358,7 +1439,7 @@ async function renderClaim(){
     bar.innerHTML=`
       ${needThbCount>0?`<div class="warn">⚠ ${needThbCount} foreign item${needThbCount>1?"s":""} need a THB claim amount before this can be generated</div>`:""}
       ${noProofCount>0?`<div class="warn">⚠ ${noProofCount} of ${selCount} selected ${selCount===1?"entry has":"entries have"} no proof</div>`:""}
-      <div class="tot-figs">${totKeys.length?totKeys.map(c=>`<span class="tf">${money(tot[c],c)}</span>`).join(""):'<span class="tf" style="color:var(--slate)">Nothing selected</span>'}</div>
+      <div class="tot-figs">${totKeys.length?totKeys.map(c=>`<span class="tf">${money(tot[c],c)}</span>`).join(""):'<span class="tf" style="color:var(--ink-2)">Nothing selected</span>'}</div>
       <button class="btn btn-primary" id="genBtn" ${selCount===0?"disabled":""}>Generate claim · ${selCount} item${selCount!==1?"s":""}</button>`;
     sc.querySelector(".screen-body").appendChild(bar);
     sc.querySelector("#genBtn").addEventListener("click",()=>generateBatch(list,sc));
@@ -1514,7 +1595,7 @@ async function openBatchesTab(){
     const claimName=typeof b.claim_name==="string"?b.claim_name.trim():"",companyItems=`${esc(companyName(b.company_id))} · ${items.length} item${items.length!==1?"s":""}`;
     const firstLeft=claimName?`<span class="claim-date">${fmtDateShort(b.submitted_date)} ·</span><span class="claim-name">${esc(claimName)}</span>`:`<span class="claim-date">${fmtDateShort(b.submitted_date)} ·</span><span class="claim-id mono">${esc(b.claim_no||"")}</span>`;
     const secondLeft=claimName?`<span class="claim-id mono">${esc(b.claim_no||"")}</span><span class="batch-company-items"> · ${companyItems}</span>`:companyItems;
-    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${esc(b.id)}"><div class="batch-card-grid"><div class="left claim-line">${firstLeft}</div><div class="right total">${amountLine(amounts.submitted)}</div><div class="left ${claimName?"batch-ident-line":""}">${secondLeft}</div><div class="right ${cls}">${statusTag}</div><div class="left">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)}</div><div class="right outcomes">${outcome}</div></div></div>`;
+    return `<div class="batch-card ${b.status==="cancelled"?"cancelled":""}" data-id="${esc(b.id)}"><div class="batch-card-grid"><div class="left claim-line">${firstLeft}</div><div class="right total">${amountLine(amounts.submitted)}</div><div class="left grid-ident ${claimName?"batch-ident-line":""}">${secondLeft}</div><div class="right grid-status ${cls}">${statusTag}</div><div class="left grid-range">${fmtDateShort(b.range_start)} – ${fmtDateShort(b.range_end)}</div><div class="right outcomes">${outcome}</div></div></div>`;
   }).join("");
   let body;
   if(batches.length===0){
@@ -1563,10 +1644,10 @@ async function openBatchDetail(batchId){
   if(!isCancelled&&pendingCount>0){
     actionBtn+=`<button class="btn btn-positive" id="allPaid" style="margin-top:10px;">Reimburse all</button>`;
   }else if(!isCancelled&&reimbursedCount>0){
-    actionBtn+=`<button class="btn btn-ghost" id="undoReimb" style="margin-top:10px;color:var(--danger);">Undo reimbursement</button>`;
+    actionBtn+=`<button class="btn-destructive" id="undoReimb">Undo reimbursement</button>`;
   }
   if(!isCancelled&&reimbursedCount===0){ // nothing paid yet → the whole claim can be cancelled
-    actionBtn+=`<button class="btn btn-danger" id="cancelClaim" style="margin-top:10px;">Cancel claim (return items to Unclaimed)</button>`;
+    actionBtn+=`<button class="btn-destructive" id="cancelClaim">Cancel claim (return items to Unclaimed)</button>`;
   }
 
   const body=`
@@ -1961,7 +2042,7 @@ async function exportFilteredCSV(){
    ============================================================ */
 async function openCompanies(firstRun){
   const body=`
-    <div class="warn" id="firstRunBanner" style="background:#e5f3f1;color:var(--jade-deep);${state.companies.length>0?'display:none;':''}">Add at least one company to start logging.</div>
+    <div class="warn" id="firstRunBanner" style="color:var(--accent);${state.companies.length>0?'display:none;':''}">Add at least one company to start logging.</div>
     ${firstRun?`<div class="field" style="margin-bottom:14px;"><label>Your name <span class="opt">(optional — appears on claim sheets)</span></label><input type="text" id="firstName" placeholder="Full name" value="${esc(state.claimantName||"")}"></div>`:""}
     <div id="companyList"></div>
     <button class="btn btn-ghost" id="addCompanyBtn" style="margin-top:12px;">+ Add company</button>
@@ -1982,7 +2063,7 @@ async function openCompanies(firstRun){
     if(banner)banner.style.display="none";
     if(startBtn)startBtn.style.display="";
     cl.innerHTML=state.companies.map(c=>`<div class="claim-row" data-id="${esc(c.id)}">
-      <div class="info"><div class="t"><span class="co-dot" style="background:${c.color||'#b4b2a9'}"></span>${esc(c.name)}</div><div class="s">Default currency: ${c.default_currency||state.defaultCurrency}</div></div>
+      <div class="info"><div class="t"><span class="co-dot" style="background:${c.color||'var(--ink-3)'}"></span>${esc(c.name)}</div><div class="s">Default currency: ${c.default_currency||state.defaultCurrency}</div></div>
       <button class="tag" data-edit="${esc(c.id)}">Edit</button>
     </div>`).join("");
     cl.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>companyForm(()=>{refresh();},state.companies.find(x=>x.id===b.dataset.edit))));
@@ -2233,16 +2314,67 @@ function dbxStatusLine(){
 }
 
 /* ============================================================
+   THEME (Light / Dark / System)
+   The boot-time inline script (first thing in <body>) already applied the saved theme
+   from localStorage before paint, so there's no flash. This section keeps state in sync,
+   lets the user change it, and follows the OS live while in System mode.
+   meta.themeMode is the canonical record for the Appearance setting; localStorage is a
+   mirror kept only so the pre-IndexedDB boot script can read it before paint. Reading
+   localStorage first at runtime also means a restore (which replaces IndexedDB stores,
+   not localStorage) can never disturb this device's theme choice.
+   ============================================================ */
+const THEME_KEY="claims_theme", THEME_MODES=["light","dark","system"];
+function applyTheme(mode){
+  const wantsDark = mode==="dark" || (mode==="system" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", wantsDark?"dark":"light");
+  const tc=document.getElementById("themeColorMeta"); if(tc) tc.setAttribute("content", wantsDark?"#000000":"#FAF9F6");
+}
+let themeMediaQuery=null;
+function onSystemThemeChange(){ applyTheme(state.themeMode||"system"); }
+function watchSystemTheme(mode){
+  if(themeMediaQuery){ try{ themeMediaQuery.removeEventListener("change", onSystemThemeChange); }catch(e){} themeMediaQuery=null; }
+  if(mode==="system" && window.matchMedia){
+    themeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    try{ themeMediaQuery.addEventListener("change", onSystemThemeChange); }catch(e){ /* older Safari */ }
+  }
+}
+async function loadThemeMode(){
+  let mode=null;
+  try{ const ls=localStorage.getItem(THEME_KEY); if(THEME_MODES.includes(ls)) mode=ls; }catch(e){ /* ignore */ }
+  if(!mode){ const m=await DB.get("meta","themeMode"); mode=THEME_MODES.includes(m?.v)?m.v:"system"; }
+  state.themeMode=mode;
+  applyTheme(mode);
+  watchSystemTheme(mode);
+  try{ await DB.put("meta",{k:"themeMode",v:mode}); }catch(e){ /* never block boot */ }
+}
+// User-initiated change from More → Appearance. Deliberately does NOT call markDataChanged() —
+// a theme preference isn't user data worth a backup nag, and it's excluded from backups entirely.
+async function setThemeMode(mode){
+  if(!THEME_MODES.includes(mode)) return;
+  state.themeMode=mode;
+  try{ localStorage.setItem(THEME_KEY, mode); }catch(e){ /* ignore */ }
+  applyTheme(mode);
+  watchSystemTheme(mode);
+  try{ await DB.put("meta",{k:"themeMode",v:mode}); }catch(e){ /* ignore */ }
+}
+
+/* ============================================================
    SETTINGS / MORE
    ============================================================ */
 function openSettings(){
+  const themeLabel={light:"Light",dark:"Dark",system:"System"}[state.themeMode||"system"];
   const body=`
+    <div class="section-label">Appearance</div>
+    <div class="list-choice">
+      <button id="sTheme">Theme <span style="color:var(--ink-2);font-weight:600">${themeLabel} ›</span></button>
+    </div>
+
     <div class="section-label">Setup</div>
     <div class="list-choice">
-      <button id="sName">Your name <span style="color:var(--slate);font-weight:600">${state.claimantName?esc(state.claimantName):"Not set"} ›</span></button>
+      <button id="sName">Your name <span style="color:var(--ink-2);font-weight:600">${state.claimantName?esc(state.claimantName):"Not set"} ›</span></button>
       <button id="sCompanies">Companies <span class="check">›</span></button>
       <button id="sDestinations">Destinations <span class="check">›</span></button>
-      <button id="sCurrency">Default currency <span style="color:var(--slate);font-weight:600">${state.defaultCurrency} ›</span></button>
+      <button id="sCurrency">Default currency <span style="color:var(--ink-2);font-weight:600">${state.defaultCurrency} ›</span></button>
     </div>
 
     <div class="section-label">Data</div>
@@ -2256,7 +2388,7 @@ function openSettings(){
     <div class="section-label">Cloud backup</div>
     <div class="hint">${dbxStatusLine()}</div>
     <div class="list-choice" style="margin-top:8px;">
-      ${state.dbxAuth?`<button id="sDbxNow">Back up now <span class="check">↑</span></button><button id="sDbxDisconnect" style="color:var(--danger)">Disconnect Dropbox <span class="check">×</span></button>`:`<button id="sDbxConnect">Connect Dropbox <span class="check">›</span></button>`}
+      ${state.dbxAuth?`<button id="sDbxNow">Back up now <span class="check">↑</span></button><button id="sDbxDisconnect" style="color:var(--st-rejected)">Disconnect Dropbox <span class="check">×</span></button>`:`<button id="sDbxConnect">Connect Dropbox <span class="check">›</span></button>`}
     </div>
     <div class="hint" style="margin-top:8px;">Backups go to Dropbox → Apps → claims-backup. The last 7 days are kept (one file per weekday).</div>
 
@@ -2267,9 +2399,14 @@ function openSettings(){
 
     <div class="section-label">About</div>
     <div class="hint">Claims · a personal, offline expense tracker. ${state.entries.length} entries · ${state.companies.length} companies stored locally.</div>
-    <div class="hint" style="color:var(--slate);">Version ${APP_VERSION}</div>
+    <div class="hint" style="color:var(--ink-2);">Version ${APP_VERSION}</div>
   `;
   const sc=openScreen("More", body);
+  sc.querySelector("#sTheme").addEventListener("click",()=>{
+    chooseSheet("Theme",[{value:"light",label:"Light"},{value:"dark",label:"Dark"},{value:"system",label:"System"}],state.themeMode||"system",async v=>{
+      await setThemeMode(v);toast("Theme set to "+({light:"Light",dark:"Dark",system:"System"}[v]));closeScreen(sc);openSettings();
+    });
+  });
   sc.querySelector("#sName").addEventListener("click",()=>promptClaimantName(()=>{ closeScreen(sc); openSettings(); }));
   sc.querySelector("#sCompanies").addEventListener("click",()=>openCompanies(false));
   sc.querySelector("#sDestinations").addEventListener("click",openDestinations);
@@ -2300,7 +2437,7 @@ function openSettings(){
 
 async function saveDestinations(){await DB.put("meta",{k:"travelDestinations",v:state.destinations.map(x=>({...x}))});}
 function openDestinations(){
-  const body=`<div class="hint" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;"><span>Current global fuel rate: <strong>${money(state.fuelRateMinor,"THB")}/km</strong></span><button type="button" class="btn btn-ghost btn-sm" id="editGlobalRate" style="width:auto;flex:none;">Edit rate</button></div><div id="destList">${state.destinations.length?state.destinations.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<div class="sum-card dest-card" data-id="${esc(p.id)}"><h4>${esc(p.name)} ${p.is_default?'<span style="color:var(--jade);font-weight:500;">· Default</span>':''}</h4><div class="sum-row"><span>Total distance</span><span class="v">${p.distance_km} km</span></div><div class="sum-row"><span>Fuel rate</span><span class="v">${money(p.fuel_rate_minor,"THB")}/km</span></div><div class="sum-row"><span>Total amount</span><span class="v">${money(travelFuelMinor(p.distance_km,p.fuel_rate_minor)+(p.toll_minor||0),"THB")}</span></div><div class="dest-actions"><button class="btn btn-ghost btn-sm" data-edit="${esc(p.id)}">Edit</button><button class="btn btn-ghost btn-sm" data-del="${esc(p.id)}">Delete</button></div></div>`).join(""):`<div class="empty" style="padding:30px;"><p>No destinations yet.</p></div>`}</div><button class="btn btn-primary" id="addDestination">Add destination</button>`;
+  const body=`<div class="hint" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;"><span>Current global fuel rate: <strong>${money(state.fuelRateMinor,"THB")}/km</strong></span><button type="button" class="btn btn-ghost btn-sm" id="editGlobalRate" style="width:auto;flex:none;">Edit rate</button></div><div id="destList">${state.destinations.length?state.destinations.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<div class="sum-card dest-card" data-id="${esc(p.id)}"><h4>${esc(p.name)} ${p.is_default?'<span style="color:var(--accent);font-weight:600;">· Default</span>':''}</h4><div class="sum-row"><span>Total distance</span><span class="v">${p.distance_km} km</span></div><div class="sum-row"><span>Fuel rate</span><span class="v">${money(p.fuel_rate_minor,"THB")}/km</span></div><div class="sum-row"><span>Total amount</span><span class="v">${money(travelFuelMinor(p.distance_km,p.fuel_rate_minor)+(p.toll_minor||0),"THB")}</span></div><div class="dest-actions"><button class="btn btn-ghost btn-sm" data-edit="${esc(p.id)}">Edit</button><button class="btn btn-ghost btn-sm" data-del="${esc(p.id)}">Delete</button></div></div>`).join(""):`<div class="empty" style="padding:30px;"><p>No destinations yet.</p></div>`}</div><button class="btn btn-primary" id="addDestination">Add destination</button>`;
   const sc=openScreen("Destinations",body);sc.querySelector("#addDestination").addEventListener("click",()=>destinationForm(null,sc));sc.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>destinationForm(state.destinations.find(x=>x.id===b.dataset.edit),sc)));sc.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",async()=>{const id=b.dataset.del;if(state.entries.some(e=>e.travel_preset_id===id)){toast("This destination is used by an existing Travel entry and cannot be deleted.");return;}state.destinations=state.destinations.filter(x=>x.id!==id);await saveDestinations();await markDataChanged();closeScreen(sc);setTimeout(openDestinations,260);toast("Destination deleted");}));
   sc.querySelector("#editGlobalRate").addEventListener("click",()=>{
     openSheet(`<h3>Global fuel rate</h3><div class="field"><label>Rate (THB/km)</label><input type="number" id="grRate" min="0" step="0.01" value="${(state.fuelRateMinor/100).toFixed(2)}"></div><div class="hint" style="margin-bottom:14px;">Used as the default for new custom travel entries. Does not change saved destinations or existing entries.</div><button class="btn btn-primary" id="grSave">Save</button>`);
@@ -2327,14 +2464,14 @@ function destinationForm(existing,parent){
 
 function openTestingTools(){
   const body=`
-    <div class="warn" style="background:#fdecec;color:var(--danger);">These tools change or erase your data — back up first.</div>
+    <div class="warn" style="color:var(--st-rejected);">These tools change or erase your data — back up first.</div>
     <div class="section-label">Sample data</div>
     <div class="list-choice">
       <button id="sSeed">Load 20 sample entries <span class="check">＋</span></button>
     </div>
     <div class="section-label">Danger zone</div>
     <div class="list-choice">
-      <button id="sWipe" style="color:var(--danger)">Clear all data <span class="check">×</span></button>
+      <button id="sWipe" style="color:var(--st-rejected)">Clear all data <span class="check">×</span></button>
     </div>
   `;
   const sc=openScreen("Testing tools", body);
@@ -2435,7 +2572,7 @@ async function buildBackupJSON(){
     batches:await DB.getAll("batches"),
     batch_entries:await DB.getAll("batch_entries"),
     edits:await DB.getAll("edits"),
-    meta:await DB.getAll("meta"),
+    meta:(await DB.getAll("meta")).filter(m=>m.k!=="themeMode"), // theme is a device preference, not app data
     proofs,
   };
   return JSON.stringify(data);
@@ -2657,7 +2794,7 @@ function openSummary(){
   }
   const curLine=obj=>{const ks=Object.keys(obj);return ks.length?ks.map(c=>money(obj[c],c)).join("  ·  "):"—";};
   const rows=obj=>Object.keys(obj).sort().map(k=>`<div class="sum-row"><span>${esc(k)}</span><span class="v">${curLine(obj[k])}</span></div>`).join("")||`<div class="sum-row"><span>No data yet</span><span></span></div>`;
-  const card=(name,o,overallCard=false)=>`<div class="sum-card"><h4>${esc(name)} <span style="float:right;color:var(--slate);font-weight:500;">${o.count} ${o.count===1?"entry":"entries"}</span></h4><div class="sum-row sum-big"><span>Grand total</span><span class="v">${curLine(o.grand)}</span></div><div class="sum-row"><span class="st-word-unclaimed">Unclaimed</span><span class="v">${curLine(o.unclaimed)}</span></div><div class="sum-row"><span class="st-word-submitted">Submitted</span><span class="v">${curLine(o.submitted)}</span></div><div class="sum-row"><span class="st-word-reimbursed">Reimbursed</span><span class="v">${curLine(o.reimbursed)}</span></div></div>`;
+  const card=(name,o,overallCard=false)=>`<div class="sum-card"><h4>${esc(name)} <span style="float:right;color:var(--ink-2);font-weight:400;">${o.count} ${o.count===1?"entry":"entries"}</span></h4><div class="sum-row sum-big"><span>Grand total</span><span class="v">${curLine(o.grand)}</span></div><div class="sum-row"><span class="st-word-unclaimed">Unclaimed</span><span class="v">${curLine(o.unclaimed)}</span></div><div class="sum-row"><span class="st-word-submitted">Submitted</span><span class="v">${curLine(o.submitted)}</span></div><div class="sum-row"><span class="st-word-reimbursed">Reimbursed</span><span class="v">${curLine(o.reimbursed)}</span></div></div>`;
   const totalCard=card("All companies",overall,true);
   const compCard=[...byCompany.entries()].sort((a,b)=>companyName(a[0]).localeCompare(companyName(b[0]))||a[0].localeCompare(b[0])).map(([id,o])=>card(companyName(id),o)).join("");
   const tagCard=Object.keys(byTag).length?`<div class="sum-card"><h4>By tag</h4>${rows(byTag)}</div>`:"";
@@ -2827,6 +2964,7 @@ async function requestPersistentStorage(){
   try{
     await DB.open();
     requestPersistentStorage();
+    try{ await loadThemeMode(); }catch(e){ /* the boot-time inline script already applied a theme; never block boot */ }
     await loadAll();
     loadCloudBackupState();
     await migrateClaimIds();
@@ -2886,11 +3024,11 @@ async function requestPersistentStorage(){
       },0);
     }
   }catch(err){
-    document.body.innerHTML=`<div style="padding:40px;font-family:sans-serif;color:#16202b;">
+    document.body.innerHTML=`<div style="padding:40px;font-family:sans-serif;color:var(--ink);">
       <h2>Storage unavailable</h2>
       <p>This app needs on-device storage (IndexedDB), which your browser blocked — this usually happens when the file is opened directly (file://) or in private mode.</p>
       <p><strong>Fix:</strong> host the file (e.g. GitHub Pages) and open it over https, or open it in a normal browser tab. Then your data will save on this device.</p>
-      <p style="color:#64748b;font-size:13px;">Details: ${esc(err&&err.message||err)}</p>
+      <p style="color:var(--ink-2);font-size:var(--fs-meta);">Details: ${esc(err&&err.message||err)}</p>
     </div>`;
   }
 })();
