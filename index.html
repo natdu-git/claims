@@ -23,6 +23,7 @@
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
     --r:14px;
     --safe-b:env(safe-area-inset-bottom,0px);
+    --day-head-bg:#F2F0EA;
   }
   html[data-theme="dark"]{ /* dark — "Carbon Night" */
     --bg:#000000; --surface:#141414;
@@ -31,6 +32,7 @@
     --accent:#46D0A3; --accent-press:#5FDBB2; --on-accent:#00160E;
     --st-unclaimed:#B5B5B0; --st-submitted:#E8BE6A;
     --st-reimbursed:#7ED6A9; --st-rejected:#F08A78;
+    --day-head-bg:#141414;
   }
   :root{ /* mode-invariant */
     --fs-caption:12px; --fs-meta:13px; --fs-body:15px; --fs-title:17px; --fs-amount:24px;
@@ -80,12 +82,25 @@
 
   /* ---------- Log rows ---------- */
   .log{padding:8px 0 0;}
-  .day-head{padding:16px 16px 6px;font-size:var(--fs-caption);font-weight:600;color:var(--ink-2);}
+  .day-head{
+    display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+    padding:10px 16px 8px;margin-top:6px;
+    border-top:1px solid var(--line-strong);
+    background:var(--day-head-bg);
+    font-size:var(--fs-body);font-weight:600;color:var(--ink);letter-spacing:-.01em;
+  }
+  .day-head .dh-side{font-size:var(--fs-caption);font-weight:400;color:var(--ink-3);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
   .day-group{overflow:hidden;}
   .row{display:flex;align-items:stretch;position:relative;min-height:56px;border-bottom:1px solid var(--line);}
   .row:active{background:var(--line);}
   .row-div{display:none;}
-  .row .body{flex:1;min-width:0;padding:10px 16px;display:flex;flex-direction:column;justify-content:center;}
+  .co-strip,.st-strip{width:5px;flex:none;}
+  .st-strip-unclaimed{background:var(--st-unclaimed);}
+  .st-strip-submitted{background:var(--st-submitted);}
+  .st-strip-reimbursed{background:var(--st-reimbursed);}
+  .st-strip-rejected{background:var(--st-rejected);}
+  .row .body{flex:1;min-width:0;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;}
   .noproof-inline{color:var(--st-rejected);font-size:var(--fs-body);margin-left:5px;}
   .rline1{display:flex;justify-content:space-between;align-items:baseline;gap:12px;}
   .rline1 .vendor{font-weight:600;font-size:var(--fs-body);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -515,13 +530,38 @@ button:active,.chip:active,.tag:active,.pill:active{opacity:.55;}
 /* ---------- constants ---------- */
 // Bump this AND the matching APP_VERSION constant in sw.js together on every deploy —
 // it's how the update banner (below) knows a new version is ready.
-const APP_VERSION = "2026.07.25";
+const APP_VERSION = "2026.07.30";
 const CURRENCIES = ["THB","RMB","USD"];
 const CUR_SYM = {THB:"฿", RMB:"¥", USD:"$"};
 const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"Reimbursed"};
-// Company dot colours — deliberately NOT the status colours (grey/amber/green/red), so a
-// company dot is never mistaken for a status. Blue / purple / teal / pink family.
-const COMPANY_PALETTE = ["#8C7BE8","#2FA3C4","#D45FA8","#B08A1E"];
+// Company colours, chosen 2026-07-30. Tuned for the night theme first and verified
+// distinguishable at the real 5px strip width. See PROJECT_KNOWLEDGE.md §6 for the
+// constraints — in particular: NO yellow, green or teal. Those were tested against the
+// submitted (#E8BE6A) and reimbursed (#7ED6A9) status colours and rejected as too close.
+// Do not "complete" this palette by adding them back.
+const COMPANY_PALETTE = [
+  "#FF2E2E", // red
+  "#C2481F", // rust
+  "#FF7A00", // orange
+  "#9CE81E", // lime
+  "#00CFF5", // cyan
+  "#62B8FF", // sky
+  "#2E7BFF", // blue
+  "#6155F0", // indigo
+  "#9B4DFF", // violet
+  "#C79BFF", // lavender
+  "#FF31A8", // magenta
+  "#FF6FA8", // rose
+  "#4E86A8", // slate
+  "#4A4A46", // graphite — this is "black". Pure #000 is invisible on the night background.
+];
+// The four colours used before 2026-07-30, mapped to their nearest surviving replacement.
+const LEGACY_COMPANY_COLORS = {
+  "#8C7BE8": "#9B4DFF", // purple  -> violet
+  "#2FA3C4": "#00CFF5", // teal-blue -> cyan
+  "#D45FA8": "#FF31A8", // pink    -> magenta
+  "#B08A1E": "#FF7A00", // gold    -> orange (gold is too close to the submitted status)
+};
 function companyColor(id){const c=state.companies.find(x=>x.id===id);return (c&&c.color)||"var(--ink-3)";}
 // THB claim value of an entry. THB entries use their own amount; foreign entries use the
 // manually-entered claim_thb_minor (null until filled from the card statement).
@@ -666,6 +706,8 @@ async function loadAll(){
   // Backfill a colour + short code for any company created before they existed (one-time, stable).
   for(let i=0;i<state.companies.length;i++){ const c=state.companies[i]; let dirty=false;
     if(!c.color){ c.color=COMPANY_PALETTE[i%COMPANY_PALETTE.length]; dirty=true; }
+    if(c.color && LEGACY_COMPANY_COLORS[c.color.toUpperCase()]){
+      c.color = LEGACY_COMPANY_COLORS[c.color.toUpperCase()]; dirty=true; }
     if(!c.code){ c.code=codeFromName(c.name); dirty=true; }
     if(dirty) await DB.put("companies",c); }
   state.entries = (await DB.getAll("entries"));
@@ -828,6 +870,7 @@ function logRowHTML(e, noProof){
   const claimNo=state.activeClaimIds.get(e.id),claimWarning=state.activeClaimIntegrity.has(e.id);
   const claimMeta=claimWarning?`<span class="claim-id-part claim-id-inline claim-id-warning" title="Multiple active claim memberships detected" aria-label="Warning: multiple active claim memberships">⚠ claim conflict</span><span class="claim-separator"> · </span>`:claimNo?`<span class="claim-id-part claim-id-inline mono" title="Active claim ${esc(claimNo)}" aria-label="Active claim ${esc(claimNo)}">${esc(claimNo)}</span><span class="claim-separator"> · </span>`:"";
   return `<div class="row" data-id="${esc(e.id)}">
+      <div class="co-strip" style="background:${companyColor(e.company_id)}"></div>
       <div class="body">
         <div class="rline1">
           <div class="vendor">${esc(entryDisplayName(e))}${noProofBadge}</div>
@@ -839,8 +882,16 @@ function logRowHTML(e, noProof){
         </div>
         ${tags}
       </div>
+      <div class="st-strip st-strip-${e.status}"></div>
     </div>`;
 }
+// Weekday abbreviation for an ISO date, built from date parts in LOCAL time.
+// new Date("2026-07-28") parses as UTC midnight, which can show the wrong
+// weekday depending on the device's timezone — so we construct the Date from
+// the y/m/d parts instead, which the Date constructor treats as local time.
+const WEEKDAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+function weekdayShort(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-").map(Number);
+  return WEEKDAYS[new Date(y,m-1,d).getDay()]; }
 async function renderLog(){
   const list=filteredEntries();
   const log=$("#log");
@@ -849,19 +900,31 @@ async function renderLog(){
     log.innerHTML=`<div class="empty"><h3>${anyEntries?"No matches":"No entries yet"}</h3><p>${anyEntries?"Try clearing a filter.":"Tap + to log your first expense."}</p></div>`;
     return;
   }
-  let html="", lastDay=null, open=false, firstInGroup=false;
+  // Group first, then render — the day header needs the whole day's items
+  // (for the per-currency total) before it can be written, so we can't emit
+  // it while still walking the list one entry at a time.
+  const days=[]; let currentDay=null;
   for(const e of list){
-    if(e.payment_date!==lastDay){
-      if(open) html+=`</div>`;                 // close previous day-group
-      lastDay=e.payment_date;
-      html+=`<div class="day-head">${fmtDate(e.payment_date)}</div><div class="day-group">`;
-      open=true; firstInGroup=true;
+    if(!currentDay || e.payment_date!==currentDay.date){
+      currentDay={date:e.payment_date, items:[]};
+      days.push(currentDay);
     }
-    if(!firstInGroup) html+=`<div class="row-div"></div>`;  // inset divider between same-day rows
-    firstInGroup=false;
-    html+=logRowHTML(e, !state.proofCounts.get(e.id));
+    currentDay.items.push(e);
   }
-  if(open) html+=`</div>`;
+  let html="";
+  for(const day of days){
+    const items=day.items;
+    // Never sum across currencies — a day can hold THB, RMB and USD entries.
+    // Sum per currency, then join, the same way exportClaimSheet() does.
+    const tot={}; items.forEach(i=>tot[i.currency]=(tot[i.currency]||0)+i.amount_minor);
+    const totalText=Object.keys(tot).map(c=>money(tot[c],c)).join(" · ");
+    html+=`<div class="day-head"><span>${fmtDate(day.date)}</span><span class="dh-side">${weekdayShort(day.date)} · ${totalText}</span></div><div class="day-group">`;
+    items.forEach((e,i)=>{
+      if(i>0) html+=`<div class="row-div"></div>`;  // inset divider between same-day rows
+      html+=logRowHTML(e, !state.proofCounts.get(e.id));
+    });
+    html+=`</div>`;
+  }
   log.innerHTML=html;
 }
 
