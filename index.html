@@ -530,7 +530,7 @@ button:active,.chip:active,.tag:active,.pill:active{opacity:.55;}
 /* ---------- constants ---------- */
 // Bump this AND the matching APP_VERSION constant in sw.js together on every deploy —
 // it's how the update banner (below) knows a new version is ready.
-const APP_VERSION = "2026.07.30";
+const APP_VERSION = "2026.07.30b";
 const CURRENCIES = ["THB","RMB","USD"];
 const CUR_SYM = {THB:"฿", RMB:"¥", USD:"$"};
 const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"Reimbursed"};
@@ -1879,7 +1879,10 @@ function reimburseBatchSheet(batchId,items,sc){
     <div class="field nomb" style="margin-bottom:14px;">
       <label>Payment slip <span class="opt">(optional)</span></label>
       <div id="rbProofWrap"><button class="btn btn-ghost btn-sm" id="rbPick">Upload slip image</button></div>
-      <input type="file" id="rbFile" accept="image/*" capture="environment" class="hidden">
+      <!-- No capture="environment" here: it forces Android straight into the camera and
+           hides the gallery. Removed 2026-07-30 (WO13). The camera is still available as
+           one of the choices in the normal file picker. -->
+      <input type="file" id="rbFile" accept="image/*" class="hidden">
     </div>
     <button class="btn btn-primary" id="rbConfirm">Confirm reimbursed</button>
     <button class="btn btn-ghost" id="rbCancel" style="margin-top:10px;">Cancel</button>`);
