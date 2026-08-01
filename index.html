@@ -530,7 +530,7 @@ button:active,.chip:active,.tag:active,.pill:active{opacity:.55;}
 /* ---------- constants ---------- */
 // Bump this AND the matching APP_VERSION constant in sw.js together on every deploy —
 // it's how the update banner (below) knows a new version is ready.
-const APP_VERSION = "2026.07.30b";
+const APP_VERSION = "2026.07.30c";
 const CURRENCIES = ["THB","RMB","USD"];
 const CUR_SYM = {THB:"฿", RMB:"¥", USD:"$"};
 const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"Reimbursed"};
@@ -1982,6 +1982,53 @@ function promptClaimantName(onDone){
 /* ============================================================
    Claim sheet (printable → Save as PDF), with proof photos embedded
    ============================================================ */
+
+// WO12a (2026-07-30) — shrink receipt photos FOR THE PRINTED SHEET ONLY.
+//
+// The claim PDF is whatever the browser's "Save as PDF" makes of this sheet, so
+// every receipt goes in at whatever size it was stored — typically ~4000px wide
+// from a phone camera. The sheet prints each receipt into a column about 95mm
+// across (A4 minus 12mm margins, minus the 46% detail card), which at 300dpi is
+// about 1120px. Everything beyond that is bytes the page cannot show.
+//
+// This makes a temporary smaller copy for printing. NOTHING STORED IS CHANGED —
+// the blobs in the `proofs` store are never modified, replaced or re-saved.
+const PRINT_MAX_EDGE = 1200;
+const PRINT_JPEG_QUALITY = 0.72;
+
+// Returns an object URL for a print-sized copy of `blob`, or for the original
+// blob if it is already small enough or if anything at all goes wrong. Exactly
+// one URL is returned per call, so the caller can always track it for revoking.
+// Never throws and never rejects — a large PDF beats a sheet with a missing receipt.
+function printCopyURL(blob){
+  return new Promise(resolve=>{
+    const srcUrl=URL.createObjectURL(blob);
+    let settled=false;
+    const keepOriginal=()=>{ if(!settled){ settled=true; resolve(srcUrl); } };
+    const img=new Image();
+    img.onerror=keepOriginal;
+    img.onload=()=>{
+      if(settled) return;
+      const w=img.naturalWidth, h=img.naturalHeight;
+      const scale=Math.min(1, PRINT_MAX_EDGE/Math.max(w||1,h||1));
+      if(!(scale<1)){ keepOriginal(); return; }        // already small enough
+      try{
+        const c=document.createElement("canvas");
+        c.width=Math.max(1,Math.round(w*scale));
+        c.height=Math.max(1,Math.round(h*scale));
+        c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+        c.toBlob(b=>{
+          if(settled) return;
+          if(!b || b.size>=blob.size){ keepOriginal(); return; }  // never grow a file
+          settled=true;
+          URL.revokeObjectURL(srcUrl);                  // the small copy replaces it
+          resolve(URL.createObjectURL(b));
+        }, "image/jpeg", PRINT_JPEG_QUALITY);
+      }catch(e){ keepOriginal(); }
+    };
+    img.src=srcUrl;
+  });
+}
 async function exportClaimSheet(batchId){
   const batch=await DB.get("batches",batchId); if(!batch) return;
   const claimName=typeof batch.claim_name==="string"?batch.claim_name.trim():"";
@@ -1991,13 +2038,20 @@ async function exportClaimSheet(batchId){
   const urls=[];
   let entriesHTML="",travelProofHTML="",withProof=0,expenseNo=0,travelNo=0;
   const travelRows=[],travelTotals={distance:0,fuel:0,toll:0,total:0};
+  // WO12a: resizing every receipt takes a moment on a big claim, and the sheet is not
+  // shown until it is done — say so, or the button looks like it did nothing.
+  toast("Preparing claim sheet…");
   for(const be of items){
     const live=state.entries.find(x=>x.id===be.entry_id);
     const proofs=await DB.getByIndex("proofs","entry_id",be.entry_id);
     const imgs=proofs.filter(p=>p.file_type&&p.file_type.startsWith("image"));
     const pdfs=proofs.filter(p=>p.file_type&&!p.file_type.startsWith("image"));
     if(imgs.length||pdfs.length) withProof++;
-    let proofHTML=imgs.map(p=>{const u=URL.createObjectURL(p.blob);urls.push(u);return `<img src="${u}">`;}).join("");
+    // WO12a: build a print-sized copy of each receipt. proofHTML is reused below for
+    // BOTH the expense items and the travel-proof block, so this covers both.
+    const imgTags=[];
+    for(const p of imgs){ const u=await printCopyURL(p.blob); urls.push(u); imgTags.push(`<img src="${u}">`); }
+    let proofHTML=imgTags.join("");
     if(pdfs.length) proofHTML+=`<div class="ppdf">${pdfs.length} PDF proof${pdfs.length>1?"s":""} attached (not shown)</div>`;
     if(imgs.length===0 && pdfs.length===0) proofHTML=`<div class="pproof-empty"></div>`;
     const snapshotType=be.type_snapshot??live?.type,type=snapshotType?snapshotType[0].toUpperCase()+snapshotType.slice(1):"";
@@ -3000,14 +3054,73 @@ function cropImage(file){
   });
 }
 
+// WO12b (2026-07-30) — cap the size of a receipt photo when it is SAVED.
+//
+// Neither capture path used to shrink anything: the cropper re-encoded at the
+// photo's full camera pixel count, and "Use full photo" stored the original file
+// untouched. A phone photo is ~4000px wide; a receipt printed into the claim
+// sheet's ~95mm column needs about 1100px. 1600 leaves headroom for zooming in
+// on the phone. Raising this raises storage, Dropbox backup and PDF size together.
+//
+// UNLIKE the print-time copy above, this IS lossy and permanent — the original is
+// not kept. It affects only photos added from here on; anything already stored is
+// left alone.
+const PROOF_MAX_EDGE = 1600;
+const PROOF_JPEG_QUALITY = 0.78;
+
+// Returns {blob, type}. `type` ALWAYS describes the actual bytes.
+//
+// Why that matters: restore validation calls bytesMatchType() and checks each
+// proof's magic bytes against its stored file_type. If a PNG is re-encoded to
+// JPEG but still labelled image/png, the whole backup fails to restore months
+// later with "MIME type does not match its content". So the caller must take the
+// label from here and never from the original file.
+//
+// Fails soft: returns the input unchanged if it cannot decode, is already small
+// enough, or if re-encoding would make it bigger. A receipt that saves large is a
+// nuisance; a receipt that fails to save is lost evidence.
+function shrinkProofImage(blob, fallbackType){
+  const declared = blob.type || fallbackType || "image/jpeg";
+  return new Promise(resolve=>{
+    const url=URL.createObjectURL(blob);
+    let settled=false;
+    const keepOriginal=()=>{ if(!settled){ settled=true; URL.revokeObjectURL(url); resolve({blob, type:declared}); } };
+    const img=new Image();
+    img.onerror=keepOriginal;
+    img.onload=()=>{
+      if(settled) return;
+      const w=img.naturalWidth, h=img.naturalHeight;
+      const scale=Math.min(1, PROOF_MAX_EDGE/Math.max(w||1,h||1));
+      if(!(scale<1)){ keepOriginal(); return; }          // already small enough
+      try{
+        const c=document.createElement("canvas");
+        c.width=Math.max(1,Math.round(w*scale));
+        c.height=Math.max(1,Math.round(h*scale));
+        c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+        c.toBlob(b=>{
+          if(settled) return;
+          if(!b || b.size>=blob.size){ keepOriginal(); return; }   // never grow a file
+          settled=true;
+          URL.revokeObjectURL(url);
+          resolve({blob:b, type:"image/jpeg"});          // label follows the bytes
+        }, "image/jpeg", PROOF_JPEG_QUALITY);
+      }catch(e){ keepOriginal(); }
+    };
+    img.src=url;
+  });
+}
+
 // Add picked files to the current draft's proofs. Images pass through the
-// cropper first; PDFs are stored as-is. rerender() refreshes the thumbnails.
+// cropper first, then the size cap; PDFs are stored as-is. rerender() refreshes
+// the thumbnails.
 async function ingestProofs(files, rerender){
   for(const f of files){
     if(f.type && f.type.startsWith("image")){
-      const blob=await cropImage(f);
-      if(!blob) continue; // user cancelled this image
-      draft._proofs.push({id:uid(), file_type:blob.type||f.type, name:f.name, blob, _existing:false});
+      const cropped=await cropImage(f);
+      if(!cropped) continue; // user cancelled this image
+      // file_type comes ONLY from shrinkProofImage's answer — see its comment.
+      const out=await shrinkProofImage(cropped, f.type);
+      draft._proofs.push({id:uid(), file_type:out.type, name:f.name, blob:out.blob, _existing:false});
     }else{
       draft._proofs.push({id:uid(), file_type:f.type, name:f.name, blob:f, _existing:false});
     }
