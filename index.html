@@ -255,6 +255,17 @@
   .crop-h.bl{left:-12px;bottom:-12px;} .crop-h.br{right:-12px;bottom:-12px;}
   .cropper-bar{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;}
 
+  /* WO17 — cloud gate overlay (sign-in / loading / error screen shown at boot before the
+     app is usable). Uses the app's own theme tokens (not theme-invariant like the cropper
+     above) since it's plain UI chrome, not a photo viewer. z-index above every other
+     fixed-position layer in the app, including the print sheet and cropper (10000). */
+  #cloudGate{position:fixed;inset:0;z-index:10001;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;}
+  #cloudGate .cg-box{width:100%;max-width:340px;}
+  #cloudGate h2{font-size:var(--fs-title);margin:0 0 10px;}
+  #cloudGate p{font-size:var(--fs-body);color:var(--ink-2);margin:0 0 20px;line-height:1.45;}
+  #cloudGate .btn{margin-bottom:10px;}
+  #cloudGate .cg-progress{font-size:var(--fs-meta);color:var(--ink-2);margin-top:14px;}
+
   /* claim print sheet */
   .print-host{position:fixed;inset:0;background:#fff;color:#1f1e1d;z-index:10000;overflow:auto;padding:16px 18px;-webkit-overflow-scrolling:touch;}
   .print-actions{display:flex;gap:10px;position:sticky;top:0;background:#fff;padding-bottom:10px;}
@@ -520,6 +531,11 @@ button:active,.chip:active,.tag:active,.pill:active{opacity:.55;}
 <div class="modal-back" id="sheetBack"><div class="sheet" id="sheet"></div></div>
 <div class="toast" id="toast"></div>
 
+<!-- WO17 — cloud gate: sign-in / loading / error overlay shown at boot when the phone has
+     no data. Hidden by default; content is filled in by renderCloudGate(). Not dismissable
+     by tapping outside (no modal-back click-to-close wiring). -->
+<div id="cloudGate" class="hidden" role="dialog" aria-modal="true"></div>
+
 <script>
 "use strict";
 /* ============================================================
@@ -530,7 +546,7 @@ button:active,.chip:active,.tag:active,.pill:active{opacity:.55;}
 /* ---------- constants ---------- */
 // Bump this AND the matching APP_VERSION constant in sw.js together on every deploy —
 // it's how the update banner (below) knows a new version is ready.
-const APP_VERSION = "2026.08.02";
+const APP_VERSION = "2026.09.14";
 const CURRENCIES = ["THB","RMB","USD"];
 const CUR_SYM = {THB:"฿", RMB:"¥", USD:"$"};
 const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"Reimbursed"};
@@ -618,6 +634,12 @@ async function markDataChanged(){
   scheduleCloudBackup();
 }
 
+// Persists state.cloudSync (autosave bookkeeping — WO16). Must NOT call markDataChanged:
+// this record describes the cloud, not user data, and writing it must never re-trigger a save.
+function saveCloudSync(){
+  return DB.put("meta",{k:"cloudSync",v:state.cloudSync});
+}
+
 /* ============================================================
    IndexedDB layer
    ============================================================ */
@@ -699,6 +721,7 @@ const state = {
   dbxAuth:null,
   lastCloudBackupAt:0,
   dbxStatus:null,
+  cloudSync:null, // set in loadAll() — {dataRev, uploaded, lastDataUploadAt, lastSnapshotDay, failures}
 };
 
 async function loadAll(){
@@ -732,6 +755,17 @@ async function loadAll(){
   const lc = await DB.get("meta","lastChangeAt");
   state.newestChange = Math.max(newest, lc?.v || 0);
   state.hasData = state.entries.length>0 || state.companies.length>0;
+  // Cloud autosave bookkeeping (WO16) — one meta record, safe defaults if missing/malformed.
+  const csRec = await DB.get("meta","cloudSync");
+  const csv = (csRec && isPlainObject(csRec.v)) ? csRec.v : {};
+  state.cloudSync = {
+    dataRev: Number.isSafeInteger(csv.dataRev) ? csv.dataRev : 0,
+    uploaded: isPlainObject(csv.uploaded) ? {...csv.uploaded} : {},
+    lastDataUploadAt: Number.isSafeInteger(csv.lastDataUploadAt) ? csv.lastDataUploadAt : 0,
+    lastSnapshotDay: typeof csv.lastSnapshotDay==="string" ? csv.lastSnapshotDay : "",
+    failures: Number.isSafeInteger(csv.failures) ? csv.failures : 0,
+    snapshotFailedDay: typeof csv.snapshotFailedDay==="string" ? csv.snapshotFailedDay : "", // WO17 rev C (PM patch)
+  };
   // Proof-count cache: how many proofs each entry has, without holding the
   // blobs themselves in memory. Rebuilt once per data (re)load so it stays
   // correct after restore/wipe/seed.
@@ -1233,7 +1267,13 @@ function wireCompactForm(screen,isEdit){
     $$("#tpSort button").forEach(b=>b.addEventListener("click",()=>{ tagSort=b.dataset.s; $$("#tpSort button").forEach(x=>x.classList.toggle("on",x===b)); renderPickerList(); }));
     document.querySelector("#tpNew").addEventListener("click",async()=>{
       const name=prompt("New tag name");
-      if(name&&name.trim()){ const nm=name.trim(); await DB.put("tags",{name:nm,created_at:Date.now()}); if(!cfTags.includes(nm))cfTags.push(nm); if(!d.tags.includes(nm))d.tags.push(nm); tagFreq[nm]=tagFreq[nm]||0; tagLastUsed[nm]=Date.now(); renderPickerList(); }
+      if(name&&name.trim()){
+        const nm=name.trim();
+        // WO17 §5.1, rev B (review finding 4) — block at creation exactly what normalizeBackup
+        // rejects at restore (defect #9): control chars 0x00-0x1F, < > " ' \. `&` is allowed.
+        if(nm.length>60||/[\x00-\x1f<>"'\\]/.test(nm)){ toast("Tag names can't contain < > \" ' \\"); return; }
+        await DB.put("tags",{name:nm,created_at:Date.now()}); await markDataChanged(); if(!cfTags.includes(nm))cfTags.push(nm); if(!d.tags.includes(nm))d.tags.push(nm); tagFreq[nm]=tagFreq[nm]||0; tagLastUsed[nm]=Date.now(); renderPickerList();
+      }
     });
     document.querySelector("#tpDone").addEventListener("click",()=>{ closeSheet(); renderTags(); });
   }
@@ -1974,7 +2014,7 @@ function promptClaimantName(onDone){
   document.querySelector("#nmSave").addEventListener("click",async()=>{
     const v=document.querySelector("#nmInput").value.trim();
     if(!v){ toast("Enter your name"); return; }
-    await DB.put("meta",{k:"claimantName",v}); state.claimantName=v;
+    await DB.put("meta",{k:"claimantName",v}); state.claimantName=v; await markDataChanged();
     closeSheet(); onDone&&onDone();
   });
 }
@@ -2169,7 +2209,7 @@ async function openCompanies(firstRun){
     <button class="btn btn-primary" id="startLoggingBtn" style="margin-top:14px;${state.companies.length>0?'':'display:none;'}">Start logging ›</button>
   `;
   const sc=openScreen("Companies", body);
-  async function saveFirstName(){ const el=sc.querySelector("#firstName"); if(el){ const v=el.value.trim(); if(v && v!==state.claimantName){ await DB.put("meta",{k:"claimantName",v}); state.claimantName=v; } } }
+  async function saveFirstName(){ const el=sc.querySelector("#firstName"); if(el){ const v=el.value.trim(); if(v && v!==state.claimantName){ await DB.put("meta",{k:"claimantName",v}); state.claimantName=v; await markDataChanged(); } } }
   function refresh(){
     const cl=sc.querySelector("#companyList");
     const banner=sc.querySelector("#firstRunBanner");
@@ -2234,6 +2274,11 @@ const DBX_CLIENT_ID = "9undfh6qltj78xy";
 const DBX_REDIRECT_URI = "https://natdu-git.github.io/claims/";
 const DBX_AUTH_KEY = "claimsDbxAuth";
 const DBX_WEEKDAYS = ["sun","mon","tue","wed","thu","fri","sat"];
+// WO16 test hooks: every Dropbox fetch in this file goes through these two constants so a
+// headless-browser tester can point them at a fake server (window.__claimsDbxApi / __claimsDbxContent
+// set before boot). The OAuth *authorize* URL is a browser redirect, not a fetch — left as-is.
+const DBX_API = (window.__claimsDbxApi || "https://api.dropboxapi.com");
+const DBX_CONTENT = (window.__claimsDbxContent || "https://content.dropboxapi.com");
 
 function dbxLoadAuth(){
   try{ const raw = localStorage.getItem(DBX_AUTH_KEY); return raw ? JSON.parse(raw) : null; }
@@ -2291,7 +2336,7 @@ async function dbxHandleOAuthReturn(){
     history.replaceState(null,"",location.pathname);
     if(!expectedState || returnedState!==expectedState || !verifier){ toast("Dropbox connection could not be verified"); return; }
     const body = new URLSearchParams({code, grant_type:"authorization_code", client_id:DBX_CLIENT_ID, redirect_uri:DBX_REDIRECT_URI, code_verifier:verifier});
-    const res = await fetch("https://api.dropboxapi.com/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+    const res = await fetch(DBX_API+"/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
     if(!res.ok) throw new Error("Dropbox token exchange failed");
     const tok = await res.json();
     const auth = {
@@ -2303,7 +2348,7 @@ async function dbxHandleOAuthReturn(){
     };
     dbxSaveAuth(auth); state.dbxAuth = auth; state.dbxStatus = null;
     try{
-      const accRes = await fetch("https://api.dropboxapi.com/2/users/get_current_account",{method:"POST",headers:{"Authorization":"Bearer "+auth.access_token,"Content-Type":"application/json"},body:"null"});
+      const accRes = await fetch(DBX_API+"/2/users/get_current_account",{method:"POST",headers:{"Authorization":"Bearer "+auth.access_token,"Content-Type":"application/json"},body:"null"});
       if(accRes.ok){ const acc = await accRes.json(); auth.account_email = acc && acc.email || null; dbxSaveAuth(auth); state.dbxAuth = auth; }
     }catch(e){ /* best-effort — connection still succeeded */ }
     toast("Dropbox connected");
@@ -2323,7 +2368,7 @@ async function dbxAccessToken(){
   dbxRefreshInFlight = (async()=>{
     try{
       const body = new URLSearchParams({grant_type:"refresh_token", refresh_token:auth.refresh_token, client_id:DBX_CLIENT_ID});
-      const res = await fetch("https://api.dropboxapi.com/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+      const res = await fetch(DBX_API+"/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
       if(!res.ok){
         if(res.status===400||res.status===401){ dbxClearAuth(); state.dbxAuth=null; state.dbxStatus="disconnected"; }
         return null;
@@ -2340,31 +2385,51 @@ async function dbxAccessToken(){
 async function dbxDisconnect(){
   const auth = state.dbxAuth;
   if(auth && auth.access_token){
-    try{ await fetch("https://api.dropboxapi.com/2/auth/token/revoke",{method:"POST",headers:{"Authorization":"Bearer "+auth.access_token}}); }catch(e){ /* best-effort */ }
+    try{ await fetch(DBX_API+"/2/auth/token/revoke",{method:"POST",headers:{"Authorization":"Bearer "+auth.access_token}}); }catch(e){ /* best-effort */ }
   }
   clearTimeout(cloudBackupTimer);
   dbxClearAuth();
   state.dbxAuth = null; state.lastCloudBackupAt = 0; state.dbxStatus = null;
+  // WO16 rev B — a reconnect may be to a different account or an emptied Dropbox folder, so
+  // forget what we believe is already in the cloud (keep dataRev — it's just a counter).
+  if(state.cloudSync){
+    state.cloudSync.uploaded = {}; state.cloudSync.lastSnapshotDay = ""; state.cloudSync.failures = 0;
+    saveCloudSync().catch(()=>{});
+  }
   renderBackupBanner();
 }
 
 let cloudBackupTimer = null;
-// Debounced trigger — fires ~2 minutes after the most recent change, resetting on each new one.
+// Debounce for the incremental autosave (WO16) — was a 2-minute whole-file timer; now fires a
+// few seconds after the most recent change, resetting on each new one. cloudDebounceMs is
+// overridable at runtime via window.__claimsCloud.setDebounceMs (§6) so a tester can run the
+// retry-backoff scenario (T4) quickly without waiting on real wall-clock minutes.
+let cloudDebounceMs = 5000;
 function scheduleCloudBackup(){
   if(!state.dbxAuth) return;
   clearTimeout(cloudBackupTimer);
-  cloudBackupTimer = setTimeout(()=>{ cloudBackupNow(false); }, 2*60*1000);
+  cloudBackupTimer = setTimeout(()=>{ cloudBackupNow(false); }, cloudDebounceMs);
+}
+// Consecutive-failure retry backoff (§3.5): 30s, 2min, 10min, 30min, then 30min repeating.
+// Scaled by the same multiplier as cloudDebounceMs so a shortened test debounce also shortens
+// retries proportionally (see setDebounceMs in the §6 test hooks below).
+const CLOUD_RETRY_DELAYS_MS = [30e3, 120e3, 600e3, 1800e3];
+function scheduleCloudRetry(){
+  const idx = Math.min(Math.max((state.cloudSync.failures||1)-1, 0), CLOUD_RETRY_DELAYS_MS.length-1);
+  const delay = CLOUD_RETRY_DELAYS_MS[idx] * (cloudDebounceMs/5000);
+  clearTimeout(cloudBackupTimer);
+  cloudBackupTimer = setTimeout(()=>{ cloudBackupNow(false); }, delay);
 }
 
-async function dbxUploadOne(token, path, json){
-  return fetch("https://content.dropboxapi.com/2/files/upload",{
+async function dbxUploadOne(token, path, body){
+  return fetch(DBX_CONTENT+"/2/files/upload",{
     method:"POST",
     headers:{
       "Authorization":"Bearer "+token,
       "Content-Type":"application/octet-stream",
       "Dropbox-API-Arg": JSON.stringify({path, mode:"overwrite", mute:true}),
     },
-    body: json,
+    body,
   });
 }
 async function dbxUploadBoth(token, ddd, json){
@@ -2375,62 +2440,429 @@ async function dbxUploadBoth(token, ddd, json){
     return {success:false, authFailed: r1.status===401||r2.status===401};
   }catch(e){ return {success:false, authFailed:false}; }
 }
+// Deletes one proof from /v2/proofs — a 409 (already gone) counts as success.
+async function dbxDeleteProof(token, id){
+  try{
+    const res = await fetch(DBX_API+"/2/files/delete_v2",{
+      method:"POST",
+      headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},
+      body: JSON.stringify({path:`/v2/proofs/${id}`}),
+    });
+    if(res.ok) return {success:true};
+    if(res.status===409) return {success:true};
+    return {success:false, authFailed: res.status===401};
+  }catch(e){ return {success:false, authFailed:false}; }
+}
 let dbxUploadInFlight = false;
 // The one entry point for cloud backup — called from the debounce, the visibilitychange
-// trigger, and the manual "Back up now" button. manual=true surfaces toasts; automatic
-// (debounced/background) runs stay silent so the app is never chatty.
+// trigger, the "online" listener, and the manual "Save to cloud now" button. manual=true
+// surfaces toasts; automatic (debounced/background) runs stay silent so the app is never
+// chatty. Rewritten in WO16 for incremental autosave — see Work Order #16 §3.3.
 async function cloudBackupNow(manual=false){
   if(dbxUploadInFlight) return;
+  if(!cloudGateResolved) return; // WO17 §4 — never write to the cloud while the boot gate hasn't decided yet
   if(!state.dbxAuth){ if(manual) toast("Connect Dropbox first"); return; }
   if(navigator.onLine===false){ if(manual) toast("You're offline"); return; }
   dbxUploadInFlight = true;
-  try{
-    let json;
-    try{ json = await buildBackupJSON(); }
-    catch(e){ state.dbxStatus="failed"; renderBackupBanner(); if(manual) toast("Backup failed"); return; }
-    if(json.length > 140*1024*1024){
-      state.dbxStatus = "toolarge"; renderBackupBanner();
-      if(manual) toast("Backup too large for auto-upload — use manual export");
-      return;
-    }
-    const ddd = DBX_WEEKDAYS[new Date().getDay()];
-    let token = await dbxAccessToken();
-    if(!token){
-      state.dbxStatus = "disconnected"; renderBackupBanner();
-      if(manual) toast("Reconnect Dropbox in More → Data");
-      return;
-    }
-    let result = await dbxUploadBoth(token, ddd, json);
-    if(!result.success && result.authFailed){
+  let token = null;
+  let authRetried = false;
+  // Runs one Dropbox call with the shared token, refreshing once on a 401 and retrying it.
+  async function withAuth(callFn){
+    if(!token) return null;
+    let res;
+    try{ res = await callFn(token); }catch(e){ return null; }
+    if(res && (res.status===401 || res.authFailed===true) && !authRetried){
+      authRetried = true;
       const auth = state.dbxAuth; if(auth){ auth.expires_at = 0; dbxSaveAuth(auth); }
       token = await dbxAccessToken();
-      if(token) result = await dbxUploadBoth(token, ddd, json);
-      else { state.dbxStatus = "disconnected"; renderBackupBanner(); if(manual) toast("Reconnect Dropbox in More → Data"); return; }
+      if(!token) return null;
+      try{ res = await callFn(token); }catch(e){ return null; }
     }
-    if(result.success){
-      const now = Date.now();
-      const auth = {...(state.dbxAuth||{}), lastCloudBackupAt: now};
-      dbxSaveAuth(auth); state.dbxAuth = auth; state.lastCloudBackupAt = now; state.dbxStatus = "ok";
-      renderBackupBanner();
-      if(manual) toast("Backed up to Dropbox");
-    }else{
-      state.dbxStatus = "failed"; renderBackupBanner();
-      if(manual) toast("Backup failed — will retry automatically");
+    return res;
+  }
+  function fail(){
+    state.cloudSync.failures = (state.cloudSync.failures||0) + 1;
+    state.dbxStatus = "failed";
+    saveCloudSync().catch(()=>{});
+    scheduleCloudRetry();
+    renderBackupBanner();
+    if(manual) toast("Backup failed — will retry automatically");
+  }
+  function disconnected(){
+    state.dbxStatus = "disconnected";
+    clearTimeout(cloudBackupTimer); // no retry timer — WO17 adds the sign-in screen
+    renderBackupBanner();
+    if(manual) toast("Reconnect Dropbox in More → Data");
+  }
+  try{
+    token = await dbxAccessToken();
+    if(!token){ disconnected(); return; }
+
+    // Step 1-2: upload any local proof not yet known to be in the cloud, sequentially.
+    let proofsRaw;
+    try{ proofsRaw = await DB.getAll("proofs"); }
+    catch(e){ fail(); return; }
+    const uploaded = state.cloudSync.uploaded;
+    let proofFailed = false;
+    for(const p of proofsRaw){
+      if(uploaded[p.id] != null) continue;
+      const size = p.blob ? p.blob.size : 0;
+      if(size > 20*1024*1024){ proofFailed = true; continue; } // should be impossible — never throw
+      const res = await withAuth(tok=>dbxUploadOne(tok, `/v2/proofs/${p.id}`, p.blob));
+      if(res === null){ // token dead mid-run
+        if(!state.dbxAuth){ disconnected(); return; }
+        proofFailed = true; continue;
+      }
+      if(res.ok){
+        uploaded[p.id] = size;
+        try{ await saveCloudSync(); }catch(e){ /* best-effort; retried next run */ }
+      }else{
+        proofFailed = true;
+      }
+    }
+    if(proofFailed){ fail(); return; }
+
+    // Step 3: upload data.json — only once every proof it references is in the cloud.
+    const nextRev = (state.cloudSync.dataRev||0) + 1;
+    let json;
+    try{ json = await buildAutosaveJSON(nextRev, proofsRaw); }
+    catch(e){ fail(); return; }
+    if(json.length > 140*1024*1024){ fail(); return; }
+    const dataRes = await withAuth(tok=>dbxUploadOne(tok, "/v2/data.json", json));
+    if(dataRes === null){
+      if(!state.dbxAuth){ disconnected(); return; }
+      fail(); return;
+    }
+    if(!dataRes.ok){ fail(); return; }
+
+    // Step 4: record success.
+    const now = Date.now();
+    state.cloudSync.dataRev = nextRev;
+    state.cloudSync.lastDataUploadAt = now;
+    state.cloudSync.failures = 0;
+    try{ await saveCloudSync(); }catch(e){ /* best-effort */ }
+    const auth = {...(state.dbxAuth||{}), lastCloudBackupAt: now};
+    dbxSaveAuth(auth); state.dbxAuth = auth; state.lastCloudBackupAt = now; state.dbxStatus = "ok";
+    if(manual) toast("Saved to cloud");
+
+    // Step 5: delete cloud proofs that no longer exist locally. Never fails the run.
+    const localIds = new Set(proofsRaw.map(p=>p.id));
+    for(const id of Object.keys(uploaded)){
+      if(localIds.has(id)) continue;
+      const del = await withAuth(tok=>dbxDeleteProof(tok, id));
+      if(del && del.success){
+        delete uploaded[id];
+        try{ await saveCloudSync(); }catch(e){ /* retried next run */ }
+      }
+      // a failed delete is left in `uploaded` and retried next run — harmless.
+    }
+
+    // Step 6: daily full-snapshot safety net — at most once per day, or always on manual.
+    const today = todayISO();
+    // WO17 rev B — review finding 3 (should-fix): buildBackupJSON()'s §5.3 self-check throw
+    // was already caught here (fail-closed — correct), but silently, and lastSnapshotDay never
+    // advances on a deterministic failure, so every autosave run for the rest of the day
+    // rebuilt and re-validated the whole base64 backup for nothing. snapshotFailedDay (persisted
+    // on state.cloudSync, so it survives across runs/reloads the same day) skips retrying a
+    // same-day deterministic failure; a network failure is still retried by the next day's run
+    // and by the manual button.
+    if(manual || (state.cloudSync.lastSnapshotDay !== today && state.cloudSync.snapshotFailedDay !== today)){
+      try{
+        const ddd = DBX_WEEKDAYS[new Date().getDay()];
+        const snapJson = await buildBackupJSON();
+        const snapRes = await withAuth(tok=>dbxUploadBoth(tok, ddd, snapJson));
+        if(snapRes && snapRes.success){
+          state.cloudSync.lastSnapshotDay = today;
+          await saveCloudSync();
+        }
+      }catch(e){
+        console.error("Daily snapshot failed", e);
+        state.cloudSync.snapshotFailedDay = today;
+        try{ await saveCloudSync(); }catch(e2){ /* best-effort */ }
+      }
     }
   } finally {
+    renderBackupBanner();
     dbxUploadInFlight = false;
   }
 }
 function dbxStatusLine(){
   const auth = state.dbxAuth;
   if(!auth) return "Not connected";
+  const cs = state.cloudSync || {uploaded:{}, lastDataUploadAt:0, failures:0};
   const who = auth.account_email ? `Connected as ${esc(auth.account_email)}` : "Connected";
-  const last = state.lastCloudBackupAt ? `Last cloud backup ${timeAgo(state.lastCloudBackupAt)}` : "No cloud backup yet";
-  let extra = "";
-  if(state.dbxStatus==="failed") extra = " · Last attempt failed — retries automatically";
-  else if(state.dbxStatus==="disconnected") extra = " · Dropbox disconnected — reconnect below";
-  else if(state.dbxStatus==="toolarge") extra = " · Backup too large for auto-upload — use manual export";
-  return `${who}<br>${last}${extra}`;
+  let second;
+  if(state.dbxStatus==="disconnected"){
+    second = "Autosave stopped — Dropbox disconnected, reconnect below";
+  }else if((cs.failures||0) > 0){
+    second = "Autosave paused — last attempt failed, retrying automatically";
+  }else if((state.newestChange||0) > (cs.lastDataUploadAt||0)){
+    second = "Autosave on · changes waiting";
+  }else{
+    const n = Object.keys(cs.uploaded||{}).length;
+    second = cs.lastDataUploadAt
+      ? `Autosave on · saved ${timeAgo(cs.lastDataUploadAt)} · ${n} receipt${n!==1?"s":""} in cloud`
+      : "Autosave on · nothing saved yet";
+  }
+  return `${who}<br>${second}`;
+}
+// §6 test hooks — a headless-browser tester drives autosave through these without waiting on
+// real timers. Nothing in the app itself may depend on window.__claimsCloud.
+window.__claimsCloud = {
+  runNow: ()=>cloudBackupNow(false),
+  getSync: ()=>state.cloudSync,
+  setDebounceMs: (ms)=>{ cloudDebounceMs = ms; },
+  // WO17 §7 test hooks — nothing in the app itself may depend on these.
+  gateResolved: ()=>cloudGateResolved,
+  load: ()=>cloudLoad(),
+};
+
+/* ============================================================
+   CLOUD GATE (WO17 — Autosave IN)
+   Decides, once per launch, whether the phone needs to load its data back from Dropbox
+   before the app is usable: local data present → normal boot, never download (the phone
+   is the only writer — see Work Order #16 §0/§4). Local empty + connected → silent load.
+   Local empty + not connected → a sign-in screen. See Work Order #17 §2-§3.
+   ============================================================ */
+// Set true the moment the app is safe to write to the cloud: normal boot with local data,
+// a cloud-empty first run, a successful load, or the user choosing "Start without cloud".
+// cloudBackupNow() (WO16, §4 guard above) refuses to run at all until this is true, so the
+// cloud can never be overwritten while the phone might still be empty for the wrong reason.
+let cloudGateResolved = false;
+const cloudGateEl = ()=>document.getElementById("cloudGate");
+// Kept for the "Cancel" path of the empty-cloud confirm screen (§3.3), so it can return to
+// the error screen it interrupted without the loader needing to re-run.
+let cloudGateLastError = null;
+
+async function cloudGateLocalIsEmpty(){
+  // WO17 §2.1 — tags/meta alone do not count as data.
+  if((state.entries&&state.entries.length) || (state.companies&&state.companies.length)) return false;
+  let batches;
+  try{ batches = await DB.getAll("batches"); }catch(e){ return false; } // can't tell — assume not empty, never download
+  return batches.length===0;
+}
+
+function renderCloudGate(mode, opts={}){
+  const el = cloudGateEl(); if(!el) return;
+  if(mode==="loading"){
+    el.innerHTML = `<div class="cg-box"><h2>Loading your saves…</h2><div class="cg-progress" id="cloudGateProgress">${esc(opts.progress||"")}</div></div>`;
+  }else if(mode==="signin"){
+    el.innerHTML = `<div class="cg-box">
+      <h2>Load your saves</h2>
+      <p>Your data is kept in your Dropbox. Sign in once and Claims will load it.</p>
+      <button class="btn btn-primary" id="cgSignIn">Sign in to Dropbox</button>
+      <button class="btn btn-ghost" id="cgStartEmpty">Start without cloud</button>
+      <div class="hint">If you have a backup file instead, use More → Data → Restore.</div>
+    </div>`;
+    $("#cgSignIn").addEventListener("click", dbxStartConnect);
+    $("#cgStartEmpty").addEventListener("click", ()=>cloudGateStartWithoutCloud(false));
+  }else if(mode==="error"){
+    cloudGateLastError = opts;
+    el.innerHTML = `<div class="cg-box">
+      <h2>Couldn't load your saves</h2>
+      <p>${esc(opts.message||"")}</p>
+      <button class="btn btn-primary" id="cgPrimary">${opts.signIn?"Sign in to Dropbox":"Try again"}</button>
+      <button class="btn btn-ghost" id="cgStartEmpty">Start without cloud</button>
+    </div>`;
+    $("#cgPrimary").addEventListener("click", ()=>{ if(opts.signIn) dbxStartConnect(); else cloudLoad(); });
+    $("#cgStartEmpty").addEventListener("click", ()=>cloudGateStartWithoutCloud(true));
+  }else if(mode==="confirmEmpty"){
+    el.innerHTML = `<div class="cg-box">
+      <h2>Start without cloud?</h2>
+      <p>Your Dropbox has saved data. If you start empty and make changes, autosave will replace the cloud copy. Continue?</p>
+      <button class="btn btn-danger" id="cgStartEmptyYes">Start empty</button>
+      <button class="btn btn-ghost" id="cgStartEmptyNo">Cancel</button>
+    </div>`;
+    $("#cgStartEmptyYes").addEventListener("click", cloudGateFinishWithoutCloud);
+    $("#cgStartEmptyNo").addEventListener("click", ()=>renderCloudGate("error", cloudGateLastError||{}));
+  }
+  el.classList.remove("hidden");
+}
+function renderCloudGateProgress(text){
+  const p = document.getElementById("cloudGateProgress"); if(p) p.textContent = text;
+}
+function hideCloudGate(){ const el=cloudGateEl(); if(el){ el.classList.add("hidden"); el.innerHTML=""; } }
+
+function cloudGateFinishWithoutCloud(){
+  hideCloudGate();
+  cloudGateResolved = true;
+  if(state.companies.length===0) setTimeout(()=>openCompanies(true),400);
+}
+function cloudGateStartWithoutCloud(needsConfirm){
+  if(!needsConfirm){ cloudGateFinishWithoutCloud(); return; }
+  renderCloudGate("confirmEmpty");
+}
+
+function cloudLoadError(message, opts={}){
+  renderCloudGate("error", {message, signIn:!!opts.signIn});
+}
+
+// Module-scope 401-retry-once helper for the loader's downloads, kept separate from
+// cloudBackupNow's own withAuth() closure (WO16) per the WO17 dispatch note — this keeps
+// WO16's upload path (R3) untouched. Same "refresh at most once, retry once" shape.
+async function dbxFetchWithAuth(makeRequest){
+  let token = await dbxAccessToken();
+  if(!token) return {token:null, res:null};
+  let res = await makeRequest(token);
+  if(res && res.status===401){
+    const auth = state.dbxAuth; if(auth){ auth.expires_at = 0; dbxSaveAuth(auth); }
+    token = await dbxAccessToken();
+    if(!token) return {token:null, res:null};
+    res = await makeRequest(token);
+  }
+  return {token, res};
+}
+function dbxDownloadRequest(token, path){
+  return fetch(DBX_CONTENT+"/2/files/download", {
+    method:"POST",
+    headers:{ "Authorization":"Bearer "+token, "Dropbox-API-Arg": JSON.stringify({path}) },
+  });
+}
+function looksOffline(e){ return navigator.onLine===false || e instanceof TypeError; }
+async function dbxBodyHasMissingScope(res){
+  try{ const j = await res.clone().json(); return typeof j?.error_summary==="string" && j.error_summary.includes("missing_scope"); }
+  catch(e){ return false; }
+}
+
+// The cloud loader (WO17 §3) — downloads /v2/data.json and every proof, assembles a backup
+// object, and feeds it through the EXISTING validation + staged restore, silently. Never
+// writes to the cloud (dbxUploadInFlight blocks cloudBackupNow for the duration — §3.2 — and
+// cloudGateResolved stays false throughout, which is the second, independent lock).
+async function cloudLoad(){
+  renderCloudGate("loading", {progress:""});
+  dbxUploadInFlight = true;
+  try{
+    let token, res;
+    try{
+      ({token, res} = await dbxFetchWithAuth(tok=>dbxDownloadRequest(tok, "/v2/data.json")));
+    }catch(e){
+      if(looksOffline(e)){ cloudLoadError("You're offline. Connect and try again."); return; }
+      cloudLoadError("Couldn't reach Dropbox. Try again."); return;
+    }
+    if(!token || !res){ cloudLoadError("Dropbox sign-in has expired.", {signIn:true}); return; }
+    if(res.status===409){
+      let body=null; try{ body = await res.json(); }catch(e){}
+      if(body && typeof body.error_summary==="string" && body.error_summary.startsWith("path/not_found")){
+        // Cloud has nothing yet — normal first run. boot()'s own onboarding check (guarded by
+        // cloudGateResolved) opens the company setup sheet once this returns.
+        hideCloudGate(); cloudGateResolved = true; return;
+      }
+      cloudLoadError("Couldn't load your saves — unexpected response from Dropbox."); return;
+    }
+    if(res.status===401 || res.status===403){
+      if(await dbxBodyHasMissingScope(res)){ cloudLoadError("Dropbox needs the download permission — sign in again to grant it.", {signIn:true}); return; }
+      cloudLoadError("Dropbox sign-in has expired.", {signIn:true}); return;
+    }
+    if(!res.ok){ cloudLoadError("Couldn't load your saves — unexpected response from Dropbox."); return; }
+
+    let obj;
+    try{ obj = JSON.parse(await res.text()); }
+    catch(e){ cloudLoadError("Cloud data has an unexpected format"); return; }
+    if(obj.autosave!==2){ cloudLoadError("Cloud data has an unexpected format"); return; }
+
+    const proofs = Array.isArray(obj.proofs) ? obj.proofs : [];
+    for(let i=0;i<proofs.length;i++){
+      const p = proofs[i];
+      renderCloudGateProgress(`Loading receipts ${i+1} of ${proofs.length}`);
+      let pToken, pRes;
+      try{
+        ({token:pToken, res:pRes} = await dbxFetchWithAuth(tok=>dbxDownloadRequest(tok, p.cloud_path)));
+      }catch(e){
+        if(looksOffline(e)){ cloudLoadError("You're offline. Connect and try again."); return; }
+        cloudLoadError("Couldn't load your saves — a receipt could not be downloaded."); return;
+      }
+      if(!pToken || !pRes){ cloudLoadError("Dropbox sign-in has expired.", {signIn:true}); return; }
+      if(pRes.status===401 || pRes.status===403){
+        if(await dbxBodyHasMissingScope(pRes)){ cloudLoadError("Dropbox needs the download permission — sign in again to grant it.", {signIn:true}); return; }
+        cloudLoadError("Dropbox sign-in has expired.", {signIn:true}); return;
+      }
+      if(!pRes.ok){ cloudLoadError("Couldn't load your saves — a receipt could not be downloaded."); return; }
+      const buf = await pRes.arrayBuffer();
+      if(buf.byteLength !== p.bytes){ cloudLoadError("Couldn't load your saves — a receipt was incomplete."); return; }
+      p.data = await blobToBase64(new Blob([buf]));
+      delete p.bytes; delete p.cloud_path;
+    }
+
+    const savedAt = obj.saved_at, dataRev = obj.data_rev;
+    delete obj.autosave; delete obj.saved_at; delete obj.data_rev;
+
+    let normalized;
+    try{ normalized = normalizeBackup(obj); }
+    catch(e){
+      cloudLoadError(`${e.message} Your cloud copy may be damaged. Use More → Data → Restore with a daily snapshot file from Dropbox → Apps → claims-backup.`);
+      return;
+    }
+
+    await doRestore(normalized, {silent:true});
+    // WO17 rev B — review finding 1 (BLOCKER): doRestore() swallows its own failures (catches,
+    // toasts, returns normally), so success of the await above tells us nothing on its own.
+    // The RESTORE_MARKER check catches failures from the "replacing-active"/"active-committed"
+    // phases onward, but prepareNamedCopy()/snapshotActive() can throw (e.g. quota exceeded —
+    // exactly the failure mode on a phone that was just evicted for storage pressure) BEFORE
+    // the marker is ever written, in which case doRestore's catch toasts and returns with no
+    // marker present at all. Verify the restore actually landed before trusting it: compare
+    // what's now in state/DB against what normalizeBackup() validated.
+    const st = normalized.stores;
+    let landed = false;
+    if(!localStorage.getItem(RESTORE_MARKER)){
+      try{
+        const [batchCount, proofCount] = await Promise.all([DB.getAll("batches"), DB.getAll("proofs")]).then(r=>[r[0].length, r[1].length]);
+        landed = (state.entries||[]).length===st.entries.length
+              && (state.companies||[]).length===st.companies.length
+              && batchCount===st.batches.length
+              && proofCount===st.proofs.length;
+      }catch(e){ landed = false; } // can't confirm — treat as not landed, fail closed
+    }
+    if(localStorage.getItem(RESTORE_MARKER)){
+      // doRestore's own recovery/verification machinery is showing its own sheet or toast
+      // (rare — obj already passed validation above). Get the gate out of the way so the
+      // user can see it; leave the gate unresolved so no autosave can run against local data
+      // that may not match the cloud yet.
+      hideCloudGate();
+      return;
+    }
+    if(!landed){
+      cloudLoadError("Your saves could not be written to this phone — it may be low on storage. Free some space and try again.");
+      return;
+    }
+
+    // Seed WO16's bookkeeping so the next autosave is incremental, not a full re-upload —
+    // `uploaded` maps each proof id to its byte size, read back from the receipts doRestore
+    // just wrote (rather than the `bytes` field deleted off each proof object above).
+    const uploaded = {};
+    try{
+      const freshProofs = await DB.getAll("proofs");
+      for(const p of freshProofs) if(p.blob) uploaded[p.id] = p.blob.size;
+    }catch(e){ /* best-effort — an inaccurate byte count here only affects a future orphan check */ }
+    state.cloudSync = { dataRev: Number.isSafeInteger(dataRev)?dataRev:0, uploaded, lastDataUploadAt: savedAt||0, lastSnapshotDay:"", failures:0 };
+    try{ await saveCloudSync(); }catch(e){ /* best-effort */ }
+    const auth = {...(state.dbxAuth||{}), lastCloudBackupAt: savedAt||Date.now()};
+    dbxSaveAuth(auth); state.dbxAuth = auth; state.lastCloudBackupAt = savedAt||Date.now();
+    renderBackupBanner(); // doRestore's renderHome() already ran one, but before cloudSync was seeded above
+
+    hideCloudGate();
+    cloudGateResolved = true;
+    toast("Your saves are loaded");
+  }catch(e){
+    console.error("Cloud load failed", e);
+    cloudLoadError("Couldn't load your saves — something went wrong.");
+  }finally{
+    dbxUploadInFlight = false;
+  }
+}
+
+// Called once per launch from boot(), after dbxHandleOAuthReturn() — see Work Order #17 §2.2.
+async function cloudGate(){
+  // WO17 rev B — review finding 2 (should-fix): an interrupted local restore owns this launch.
+  // Running the loader on top of it (local empty mid-restore) would let doRestore()'s success
+  // path delete the recovery-copy DB before boot's own "Restore previous data" sheet ever
+  // gets to offer it. Resolve immediately and let boot's existing interrupted-restore handling
+  // (which runs right after this) take it from here.
+  if(localStorage.getItem(RESTORE_MARKER)){ cloudGateResolved = true; return; }
+  const empty = await cloudGateLocalIsEmpty();
+  if(!empty){ cloudGateResolved = true; return; } // local wins, always — never download
+  if(!state.dbxAuth){ renderCloudGate("signin"); return; } // stays unresolved until the user acts
+  await cloudLoad();
 }
 
 /* ============================================================
@@ -2508,9 +2940,9 @@ function openSettings(){
     <div class="section-label">Cloud backup</div>
     <div class="hint">${dbxStatusLine()}</div>
     <div class="list-choice" style="margin-top:8px;">
-      ${state.dbxAuth?`<button id="sDbxNow">Back up now <span class="check">↑</span></button><button id="sDbxDisconnect" style="color:var(--st-rejected)">Disconnect Dropbox <span class="check">×</span></button>`:`<button id="sDbxConnect">Connect Dropbox <span class="check">›</span></button>`}
+      ${state.dbxAuth?`<button id="sDbxNow">Save to cloud now <span class="check">↑</span></button><button id="sDbxDisconnect" style="color:var(--st-rejected)">Disconnect Dropbox <span class="check">×</span></button>`:`<button id="sDbxConnect">Connect Dropbox <span class="check">›</span></button>`}
     </div>
-    <div class="hint" style="margin-top:8px;">Backups go to Dropbox → Apps → claims-backup. The last 7 days are kept (one file per weekday).</div>
+    <div class="hint" style="margin-top:8px;">Autosave keeps a live copy in Dropbox → Apps → claims-backup (folder <code>v2</code>). A full daily snapshot is also kept for the last 7 days.</div>
 
     <div class="section-label">Testing tools</div>
     <div class="list-choice">
@@ -2532,7 +2964,7 @@ function openSettings(){
   sc.querySelector("#sDestinations").addEventListener("click",openDestinations);
   sc.querySelector("#sCurrency").addEventListener("click",()=>{
     chooseSheet("Default currency",CURRENCIES.map(c=>({value:c,label:c})),state.defaultCurrency,async v=>{
-      state.defaultCurrency=v;await DB.put("meta",{k:"defaultCurrency",v});toast("Default set to "+v);closeScreen(sc);openSettings();
+      state.defaultCurrency=v;await DB.put("meta",{k:"defaultCurrency",v});await markDataChanged();toast("Default set to "+v);closeScreen(sc);openSettings();
     });
   });
   sc.querySelector("#sExportCsv").addEventListener("click",()=>{
@@ -2645,7 +3077,7 @@ function normalizeBackup(data){
   if(data.exported_at!=null&&(typeof data.exported_at!=="string"||isNaN(Date.parse(data.exported_at))))throw restoreError(stage,"The export timestamp is invalid");
   for(const n of APP_STORES)if(!Array.isArray(data[n]))throw restoreError(stage,`Backup store '${n}' is missing`,n);
   const seen={};for(const n of APP_STORES)seen[n]=new Set();
-  const unique=(store,key)=>{if(typeof key!=="string"||!key||key.length>200||!/^[^\x00-\x1f<>"'&\\]+$/.test(key))throw restoreError(stage,`Invalid key in ${store}`,store,key);if(seen[store].has(key))throw restoreError(stage,`Duplicate key '${key}' in ${store}; current data was not changed`,store,key);seen[store].add(key);};
+  const unique=(store,key)=>{const re=store==="tags"?/^[^\x00-\x1f<>"'\\]+$/:/^[^\x00-\x1f<>"'&\\]+$/;if(typeof key!=="string"||!key||key.length>200||!re.test(key))throw restoreError(stage,`Invalid key in ${store}`,store,key);if(seen[store].has(key))throw restoreError(stage,`Duplicate key '${key}' in ${store}; current data was not changed`,store,key);seen[store].add(key);};
   const currencies=new Set(["THB","RMB","USD"]),out={};
   out.companies=data.companies.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid company record","companies");unique("companies",x.id);if(!safeString(x.name,500)||!x.name.trim()||!currencies.has(x.default_currency)||typeof x.archived!=="boolean"||!finiteTime(x.created_at)||!/^#[0-9a-f]{6}$/i.test(x.color||"")||!/^[A-Z0-9]{1,6}$/.test(x.code||""))throw restoreError(stage,`Invalid company '${x.id}'`,"companies",x.id);return {...x,name:x.name.trim(),code:x.code.toUpperCase()};});
   out.entries=data.entries.map(x=>{if(!isPlainObject(x))throw restoreError(stage,"Invalid entry record","entries");unique("entries",x.id);if(typeof x.company_id!=="string"||!["expense","travel"].includes(x.type)||!Number.isSafeInteger(x.amount_minor)||x.amount_minor<0||!currencies.has(x.currency)||(x.claim_thb_minor!=null&&(!Number.isSafeInteger(x.claim_thb_minor)||x.claim_thb_minor<0))||!validISODate(x.payment_date)||!["unclaimed","submitted","reimbursed"].includes(x.status)||!safeString(x.vendor)||!safeString(x.notes)||!safeString(x.location_label||"")||!Array.isArray(x.tags)||x.tags.some(t=>!safeString(t,500))||!validCoordPair(x.location_lat,x.location_lng)||!finiteTime(x.created_at)||!finiteTime(x.updated_at,true))throw restoreError(stage,`Invalid entry '${x.id}'`,"entries",x.id);validateTravelFields(x);return {...x,tags:[...x.tags]};});
@@ -2692,7 +3124,39 @@ async function buildBackupJSON(){
     batches:await DB.getAll("batches"),
     batch_entries:await DB.getAll("batch_entries"),
     edits:await DB.getAll("edits"),
-    meta:(await DB.getAll("meta")).filter(m=>m.k!=="themeMode"), // theme is a device preference, not app data
+    meta:(await DB.getAll("meta")).filter(m=>m.k!=="themeMode" && m.k!=="cloudSync"), // device prefs / cloud bookkeeping, not app data
+    proofs,
+  };
+  const json = JSON.stringify(data);
+  // WO17 §5.3 — export self-check: a backup that cannot be restored must fail on the day it
+  // is made. Validate the exact bytes about to be returned through the existing restore
+  // validator, on a private deep copy — normalizeBackup decodes every proof's base64 in
+  // place, so it must not be handed the original `data` object. Throws on failure; callers
+  // (exportBackup's manual path, cloudBackupNow's daily-snapshot path) decide what to do.
+  normalizeBackup(JSON.parse(json));
+  return json;
+}
+// Builds the incremental-autosave JSON (WO16 §2.1) — same shape as buildBackupJSON() except
+// each proof carries {bytes, cloud_path} instead of its base64 `data` (the bytes already live
+// at that cloud_path from a prior proof upload), plus three format-marker fields. dataRev is
+// the revision this upload will become on success (see cloudBackupNow step 3-4). proofsRaw is
+// the exact list the run's upload loop reconciled against `uploaded` — NOT re-read from DB —
+// so a receipt attached mid-run can never be listed before its bytes exist in the cloud (the
+// next debounced run picks it up). Also belt-and-braces filtered to ids actually in `uploaded`.
+async function buildAutosaveJSON(dataRev, proofsRaw){
+  const cloudIds = state.cloudSync ? state.cloudSync.uploaded : {};
+  const proofs=proofsRaw.filter(p=>cloudIds[p.id]!=null).map(p=>({id:p.id, entry_id:p.entry_id, file_type:p.file_type, name:p.name,
+    added_at:p.added_at, bytes:(p.blob?p.blob.size:0), cloud_path:`/v2/proofs/${p.id}`}));
+  const data={
+    app:"ledger", version:2, exported_at:new Date().toISOString(),
+    autosave:2, saved_at:Date.now(), data_rev:dataRev,
+    companies:await DB.getAll("companies"),
+    entries:await DB.getAll("entries"),
+    tags:await DB.getAll("tags"),
+    batches:await DB.getAll("batches"),
+    batch_entries:await DB.getAll("batch_entries"),
+    edits:await DB.getAll("edits"),
+    meta:(await DB.getAll("meta")).filter(m=>m.k!=="themeMode" && m.k!=="cloudSync"),
     proofs,
   };
   return JSON.stringify(data);
@@ -2704,7 +3168,11 @@ async function exportBackup(){
   async function doExport(){
     backupExportInFlight = true;
     try{
-      const json=await buildBackupJSON();
+      let json;
+      // WO17 §5.3 — buildBackupJSON() now self-validates before returning; a backup that
+      // cannot be restored must fail here rather than be written to disk unusable.
+      try{ json=await buildBackupJSON(); }
+      catch(e){ console.error("Backup self-check failed",e); toast("Backup cannot be restored — report this"); return; }
       downloadFile(`claims_backup_${todayISO()}.json`, json, "application/json");
       const now=Date.now();
       await DB.put("meta",{k:"lastBackupAt",v:now});
@@ -2766,7 +3234,7 @@ function importBackup(){
     $("#impYes").addEventListener("click",()=>doRestore(normalized));$("#impNo").addEventListener("click",closeSheet);
   });inp.click();
 }
-async function doRestore(normalized){
+async function doRestore(normalized, opts={}){
   const stores=normalized.stores;let committed=false;const unload=e=>{e.preventDefault();e.returnValue="";};window.addEventListener("beforeunload",unload);
   try{
     restoreStage("Preparing safe restore…");await prepareNamedCopy(RESTORE_STAGE_DB,stores);
@@ -2777,7 +3245,7 @@ async function doRestore(normalized){
     restoreStage("Verifying restored data…");compareStoreKeys(stores,await snapshotActive());
     await loadAll();await renderHome();closeSheet();localStorage.removeItem(RESTORE_MARKER);
     await deleteNamedDB(RESTORE_STAGE_DB).catch(()=>{});await deleteNamedDB(RESTORE_RECOVERY_DB).catch(()=>{});
-    $$("#screens .screen").forEach(s=>closeScreen(s));toast("Restore complete");
+    $$("#screens .screen").forEach(s=>closeScreen(s));if(!opts.silent)toast("Restore complete");
   }catch(e){console.error("Restore failed",e);if(committed)offerRecovery(`${e.stage||"Restore"}: ${e.message}`);else toast(`${e.stage||"Restore"}: ${e.message}. Current data was not changed.`);}
   finally{window.removeEventListener("beforeunload",unload);}
 }
@@ -2893,7 +3361,11 @@ function refreshCurrent(){
 $("#fab").addEventListener("click",()=>openAddEntry(null));
 document.addEventListener("visibilitychange",()=>{
   if(!document.hidden){ renderBackupBanner(); }
-  else if(state.dbxAuth && (state.newestChange||0) > (state.lastCloudBackupAt||0)){ cloudBackupNow(false); }
+  else if(state.dbxAuth && (state.newestChange||0) > (state.cloudSync?.lastDataUploadAt||0)){ cloudBackupNow(false); }
+});
+// WO16 §3.2 — run the autosave when connectivity returns, if changes are pending.
+window.addEventListener("online",()=>{
+  if(state.dbxAuth && (state.newestChange||0) > (state.cloudSync?.lastDataUploadAt||0)){ cloudBackupNow(false); }
 });
 async function duplicateEntry(e){
   e=normalizeTravel(e);
@@ -3148,7 +3620,15 @@ async function requestPersistentStorage(){
     loadCloudBackupState();
     await migrateClaimIds();
     await renderHome();
-    try{ await dbxHandleOAuthReturn(); renderBackupBanner(); }catch(e){ /* never block boot */ }
+    try{
+      await dbxHandleOAuthReturn(); renderBackupBanner();
+      // WO17 §2.2 — decide, once per launch, between normal boot / silent cloud load /
+      // sign-in gate. Never blocks boot: any unexpected throw falls through to normal boot.
+      await cloudGate();
+      // WO16 rev B — resume a pending or failed autosave after a restart (the normal 5 s
+      // debounce, not the backoff timer; boot does one attempt).
+      if(state.dbxAuth && ((state.newestChange||0) > (state.cloudSync.lastDataUploadAt||0) || state.cloudSync.failures>0)) scheduleCloudBackup();
+    }catch(e){ console.error("Cloud gate failed", e); hideCloudGate(); cloudGateResolved = true; }
     const pendingRestore=localStorage.getItem(RESTORE_MARKER);
     if(pendingRestore){
       let phase=null; try{ phase=JSON.parse(pendingRestore).phase; }catch(e){}
@@ -3168,7 +3648,10 @@ async function requestPersistentStorage(){
         },450);
       }
     }
-    if(state.companies.length===0){ setTimeout(()=>openCompanies(true),400); }
+    // WO17 §2.2 — must not fire while the cloud gate hasn't resolved yet (loader running, or
+    // the sign-in screen showing): "Start without cloud" and cloudLoad()'s own cloud-empty
+    // path each trigger this themselves once the gate resolves.
+    if(state.companies.length===0 && cloudGateResolved){ setTimeout(()=>openCompanies(true),400); }
     // Register the service worker so the app can launch offline and survive
     // a cleared HTTP cache. This runs after first paint (setTimeout) so it
     // never delays startup, and any failure is swallowed silently — the app
