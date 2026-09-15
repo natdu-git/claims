@@ -546,7 +546,7 @@ button:active,.chip:active,.tag:active,.pill:active{opacity:.55;}
 /* ---------- constants ---------- */
 // Bump this AND the matching APP_VERSION constant in sw.js together on every deploy —
 // it's how the update banner (below) knows a new version is ready.
-const APP_VERSION = "2026.09.14";
+const APP_VERSION = "2026.09.15";
 const CURRENCIES = ["THB","RMB","USD"];
 const CUR_SYM = {THB:"฿", RMB:"¥", USD:"$"};
 const STATUS_LABEL = {unclaimed:"Unclaimed", submitted:"Submitted", reimbursed:"Reimbursed"};
@@ -2747,13 +2747,18 @@ async function cloudLoad(){
         // cloudGateResolved) opens the company setup sheet once this returns.
         hideCloudGate(); cloudGateResolved = true; return;
       }
-      cloudLoadError("Couldn't load your saves — unexpected response from Dropbox."); return;
+      const why = body && typeof body.error_summary==="string" ? body.error_summary.slice(0,80) : "409";
+      console.error("cloudLoad: unexpected 409", body);
+      cloudLoadError(`Couldn't load your saves — unexpected response from Dropbox (${why}).`); return;
     }
     if(res.status===401 || res.status===403){
       if(await dbxBodyHasMissingScope(res)){ cloudLoadError("Dropbox needs the download permission — sign in again to grant it.", {signIn:true}); return; }
       cloudLoadError("Dropbox sign-in has expired.", {signIn:true}); return;
     }
-    if(!res.ok){ cloudLoadError("Couldn't load your saves — unexpected response from Dropbox."); return; }
+    if(!res.ok){
+      let why=String(res.status); try{ const t=await res.text(); console.error("cloudLoad: HTTP", res.status, t); const j=JSON.parse(t); if(typeof j.error_summary==="string") why+=" "+j.error_summary.slice(0,80); }catch(e){}
+      cloudLoadError(`Couldn't load your saves — unexpected response from Dropbox (${why}).`); return;
+    }
 
     let obj;
     try{ obj = JSON.parse(await res.text()); }
@@ -2776,7 +2781,7 @@ async function cloudLoad(){
         if(await dbxBodyHasMissingScope(pRes)){ cloudLoadError("Dropbox needs the download permission — sign in again to grant it.", {signIn:true}); return; }
         cloudLoadError("Dropbox sign-in has expired.", {signIn:true}); return;
       }
-      if(!pRes.ok){ cloudLoadError("Couldn't load your saves — a receipt could not be downloaded."); return; }
+      if(!pRes.ok){ let why=String(pRes.status); try{ const j=await pRes.json(); if(typeof j.error_summary==="string") why+=" "+j.error_summary.slice(0,80); }catch(e){} console.error("cloudLoad: receipt HTTP", pRes.status, p.cloud_path); cloudLoadError(`Couldn't load your saves — a receipt could not be downloaded (${why}).`); return; }
       const buf = await pRes.arrayBuffer();
       if(buf.byteLength !== p.bytes){ cloudLoadError("Couldn't load your saves — a receipt was incomplete."); return; }
       p.data = await blobToBase64(new Blob([buf]));
